@@ -1,0 +1,213 @@
+service "my_first_webapp" {
+  provider = "aws"
+  order = [
+    "infrastructure.network.main",
+    "infrastructure.compute.web_server",
+    "infrastructure.kubernetes.main_cluster",
+    "configuration.server_setup.base",
+    "containers.app.web_frontend"
+  ]
+
+  infrastructure {
+    network "main" {
+      region             = "us-west-2"
+      availability_zones = ["us-west-2a", "us-west-2b"]
+      vpc_cidr           = "10.0.0.0/16"
+      subnet_cidrs       = ["10.0.1.0/24", "10.0.2.0/24"]
+      enable_public_ip   = true
+
+      tags = {
+        Name        = "main-network"
+        Environment = "production"
+        Project     = "FirstWebApp"
+      }
+    }
+
+    compute "web_server" {
+      ami                  = "ami-0abcdef1234567890"
+      instance_type        = "t2.small"
+      subnet               = "infrastructure.network.main.public_subnets[0]"
+      user_data            = <<-EOF
+        #!/bin/bash
+        sudo apt-get update
+        sudo apt-get install -y nginx
+      EOF
+      key_name             = "my-key-pair"
+      iam_instance_profile = "web_server_role"
+      associate_public_ip_address = true
+      root_block_device = {
+        volume_size           = 20
+        volume_type           = "gp2"
+        delete_on_termination = true
+      }
+      security_rules = {
+        inbound = [
+          {
+            port        = 80
+            protocol    = "tcp"
+            cidr        = "0.0.0.0/0"
+            description = "Allow HTTP"
+          },
+          {
+            port        = 22
+            protocol    = "tcp"
+            cidr        = "0.0.0.0/0"
+            description = "Allow SSH"
+          }
+        ]
+        outbound = [
+          {
+            port        = 0
+            protocol    = "-1"
+            cidr        = "0.0.0.0/0"
+            description = "Allow all outbound traffic"
+          }
+        ]
+      }
+      depends_on = ["infrastructure.network.main"]
+      tags = {
+        Name        = "web-server"
+        Environment = "production"
+        Project     = "FirstWebApp"
+      }
+    }
+
+    kubernetes "main_cluster" {
+      name    = "my-first-cluster"
+      version = "1.27"
+
+      node_pools = [
+        {
+          name          = "general"
+          instance_type = "t2.medium"
+          min_size      = 2
+          max_size      = 5
+          desired_size  = 2
+
+          labels = {
+            role = "worker"
+          }
+          taints = [
+            {
+              key    = "dedicated"
+              value  = "worker"
+              effect = "NoSchedule"
+            }
+          ]
+        }
+      ]
+
+      tags = {
+        Name        = "main-cluster"
+        Environment = "production"
+        Project     = "FirstWebApp"
+      }
+
+      depends_on = ["infrastructure.compute.web_server"]
+    }
+  }
+
+  configuration {
+    server_setup "base" {
+      packages = ["docker", "kubectl", "awscli"]
+
+      commands = [
+        {
+          name        = "Configure kubectl"
+          command     = "aws eks update-kubeconfig --name my-first-cluster --region us-west-2"
+          environment = {
+            AWS_DEFAULT_REGION = "us-west-2"
+          }
+        }
+      ]
+
+      verifications = [
+        {
+          name    = "Verify Docker version"
+          command = "docker --version"
+        },
+        {
+          name    = "Verify kubectl version"
+          command = "kubectl version --client"
+        },
+        {
+          name    = "Verify AWS version"
+          command = "aws --version"
+        }
+      ]
+
+      tags = {
+        Name        = "server-setup-base"
+        Environment = "production"
+        Project     = "FirstWebApp"
+      }
+
+      depends_on = ["infrastructure.kubernetes.main_cluster"]
+    }
+  }
+
+  containers {
+    app "web_frontend" {
+      image    = "nginx:latest"
+      replicas = 2
+      ports = [
+        {
+          container_port = 80
+          service_port   = 80
+        }
+      ]
+
+      resources = {
+        limits = {
+          cpu    = "500m"
+          memory = "512Mi"
+        }
+        requests = {
+          cpu    = "250m"
+          memory = "256Mi"
+        }
+      }
+
+      health_check = {
+        http_get = {
+          path = "/"
+          port = 80
+        }
+        initial_delay_seconds = 10
+        period_seconds        = 15
+      }
+
+      env = {
+        NGINX_HOST = "my-first-web-app.com"
+        NGINX_PORT = "80"
+      }
+
+      service = {
+        type        = "LoadBalancer"
+        annotations = {
+          "service.beta.kubernetes.io/aws-load-balancer-type" = "nlb"
+        }
+      }
+
+      tags = {
+        Name        = "web-frontend"
+        Environment = "production"
+        Project     = "FirstWebApp"
+      }
+
+      depends_on = ["infrastructure.kubernetes.main_cluster"]
+    }
+  }
+
+  deployment {
+    mappings = {
+      "compute.web_server"          = "configuration.server_setup.base"
+      "containers.app.web_frontend" = "infrastructure.kubernetes.main_cluster"
+    }
+    pattern {
+      resources = "compute.*"
+      condition = "tags.Environment == 'production'"
+      apply     = "configuration.server_setup.base"
+    }
+  }
+}

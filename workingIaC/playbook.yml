@@ -1,0 +1,88 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: no
+  tasks:
+    - debug:
+        msg: "Setting up localhost"
+
+- name: Configure my_first_webapp
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  become: false
+  vars: {}
+  tasks:
+    - name: Check if Docker Desktop is installed
+      stat:
+        path: /Applications/Docker.app
+      register: docker_desktop
+
+    - name: Warning about Docker Desktop
+      debug:
+        msg: "Docker Desktop is not installed. Please install it from https://www.docker.com/products/docker-desktop"
+      when: not docker_desktop.stat.exists
+
+    - name: Install required packages
+      community.general.homebrew:
+        name: '{{ item }}'
+        state: present
+        update_homebrew: true
+      loop:
+        - docker
+        - kubectl
+      tags:
+        - packages
+        
+    - name: Install AWS CLI
+      community.general.homebrew:
+        name: awscli
+        state: present
+      tags:
+        - packages
+        
+    - name: Check if AWS credentials exist
+      stat:
+        path: "{{ lookup('env', 'HOME') }}/.aws/credentials"
+      register: aws_creds
+
+    - name: Warning about AWS credentials
+      debug:
+        msg: "AWS credentials not found. Please configure AWS CLI with 'aws configure' before running kubectl configuration"
+      when: not aws_creds.stat.exists
+
+    - name: Configure kubectl
+      shell: aws eks update-kubeconfig --name my-first-cluster --region us-west-2
+      args: {}
+      environment:
+        AWS_DEFAULT_REGION: us-west-2
+      when: aws_creds.stat.exists
+      tags:
+        - configuration
+
+    - name: Verify Docker version
+      command: docker --version
+      register: docker_version
+      tags:
+        - verification
+
+    - name: Verify kubectl version
+      command: kubectl version --client
+      register: kubectl_version
+      tags:
+        - verification
+
+    - name: Verify AWS version
+      command: aws --version
+      register: aws_version
+      tags:
+        - verification
+
+    - name: Show versions
+      debug:
+        msg: 
+          - "Docker version: {{ docker_version.stdout }}"
+          - "Kubectl version: {{ kubectl_version.stdout }}"
+          - "AWS version: {{ aws_version.stdout }}"
+      tags:
+        - verification
