@@ -23,7 +23,7 @@ class TokenType(Enum):
     DEFAULT = 'default'
     TYPE = 'type'
     RESOURCE = 'resource'
-    MODULE = 'module'
+    # MODULE = 'module'
     VARIABLE = 'variable'
     OUTPUT = 'output'
     FUNCTION = 'function'

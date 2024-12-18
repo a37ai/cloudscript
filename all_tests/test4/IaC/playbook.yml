@@ -1,0 +1,17 @@
+- name: Deploy custom app
+  hosts: '{{ target_servers | default(''all'') }}'
+  become: true
+  tasks:
+  - name: Install prerequisites
+    package:
+      name:
+      - git
+      - python3-pip
+      state: present
+  - name: Clone application repo
+    git:
+      repo: https://github.com/example/myapp.git
+      dest: /opt/myapp
+  - name: Install app dependencies
+    shell:
+      cmd: pip3 install -r /opt/myapp/requirements.txt

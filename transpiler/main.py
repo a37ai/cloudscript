@@ -5,7 +5,7 @@ from .parser import EnhancedHCLParser
 from .transformer import ASTTransformer
 
 # ------------------------------
-# Transpiler Implementation
+# Transpiler
 # ------------------------------
 
 class HCLTranspiler(ASTVisitor):
@@ -311,11 +311,9 @@ class HCLTranspiler(ASTVisitor):
         if node.value is None:
             return "null"
         elif isinstance(node.value, str):
-            # If already quoted, return as is
-            if (node.value.startswith('"') and node.value.endswith('"')) or \
-            (node.value.startswith("'") and node.value.endswith("'")):
-                return node.value
-            return f'"{node.value}"'
+            # Use json.dumps to properly escape special characters
+            import json
+            return json.dumps(node.value)
         elif isinstance(node.value, bool):
             return "true" if node.value else "false"
         else:

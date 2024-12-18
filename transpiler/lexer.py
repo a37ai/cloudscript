@@ -1,5 +1,7 @@
 from typing import List, Optional
 from .tokentypes import Token, TokenType
+import codecs
+
 
 class EnhancedHCLLexer:
     def __init__(self, source: str):
@@ -17,13 +19,18 @@ class EnhancedHCLLexer:
             'switch': TokenType.SWITCH,
             'case': TokenType.CASE,
             'default': TokenType.DEFAULT,
+            # 'type': TokenType.TYPE,
             'resource': TokenType.RESOURCE,
-            'module': TokenType.MODULE,
+            # 'module': TokenType.MODULE,
             'variable': TokenType.VARIABLE,
             'output': TokenType.OUTPUT,
             'function': TokenType.FUNCTION,
             'return': TokenType.RETURN,
             'null': TokenType.NULL,
+            # 'bool': 'bool', 
+            # 'string': 'string',
+            # 'number': 'number',
+            # 'Map': 'Map',
             'true': TokenType.TRUE,
             'false': TokenType.FALSE,
             'calc': TokenType.CALC,
@@ -167,13 +174,21 @@ class EnhancedHCLLexer:
         while self.pos < len(self.source):
             char = self.source[self.pos]
             if char == '\\':
-                # Handle escape sequences
                 self.pos += 1
                 self.column += 1
                 if self.pos < len(self.source):
-                    string_value += self.source[self.pos]
-                    self.pos += 1
-                    self.column += 1
+                    escape_char = self.source[self.pos]
+                    if escape_char in 'nrt\\\'"':
+                        escape_sequence = '\\' + escape_char
+                        string_value += codecs.decode(escape_sequence, 'unicode_escape')
+                        self.pos += 1
+                        self.column += 1
+                    else:
+                        string_value += escape_char
+                        self.pos += 1
+                        self.column += 1
+                else:
+                    string_value += '\\'
             elif char == quote_char:
                 self.pos += 1
                 self.column += 1

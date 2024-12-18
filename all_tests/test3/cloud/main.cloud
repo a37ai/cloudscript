@@ -1,0 +1,104 @@
+providers {
+  aws {
+    provider = "aws"
+    region   = "us-west-2"
+    version  = "~> 4.0"
+  }
+}
+
+service "frontend" {
+  provider = "aws"
+
+  infrastructure {
+    network "vpc" {
+      cidr_block           = "10.10.0.0/16"
+      enable_dns_hostnames = true
+      resource_type        = "aws_vpc"
+    }
+
+    network "public_subnet1" {
+      vpc_id            = "${infrastructure.network.vpc.id}"
+      cidr_block        = "10.10.1.0/24"
+      availability_zone = "us-west-2a"
+      resource_type     = "aws_subnet"
+    }
+
+    network "public_subnet2" {
+      vpc_id            = "${infrastructure.network.vpc.id}"
+      cidr_block        = "10.10.2.0/24"
+      availability_zone = "us-west-2b"
+      resource_type     = "aws_subnet"
+    }
+
+    network "alb" {
+      name               = "frontend-alb"
+      load_balancer_type = "application"
+      subnets           = ["${infrastructure.network.public_subnet1.id}", "${infrastructure.network.public_subnet2.id}"]
+      resource_type     = "aws_lb"
+    }
+
+    compute "web_server" {
+      instance_type = "t3.micro"
+      ami           = "ami-061dd8b45bc7deb3d"
+      subnet_id     = "${infrastructure.network.public_subnet1.id}"
+      resource_type = "aws_instance"
+    }
+  }
+
+  configuration {
+    play "web_role" {
+      name   = "Setup Web Role"
+      hosts  = "{{ target_servers | default('all') }}"
+      become = true
+
+      task {
+        name = "Install Apache"
+        package {
+          name  = "httpd"
+          state = "present"
+        }
+      }
+
+      task {
+        name = "Start Apache"
+        service {
+          name    = "httpd"
+          state   = "started"
+          enabled = "yes"
+        }
+      }
+    }
+  }
+
+  containers {
+    app "frontend_app" {
+      image    = "nginx:latest"
+      type     = "Deployment"
+      replicas = 2
+
+      ports = [
+        {
+          container_port = 80
+          service_port   = 80
+        }
+      ]
+
+      auto_scaling {
+        min_replicas                      = 2
+        max_replicas                      = 10
+        target_cpu_utilization_percentage = 75
+      }
+
+      service {
+        type = "LoadBalancer"
+        annotations = {
+          "service.beta.kubernetes.io/aws-load-balancer-type" = "nlb"
+        }
+      }
+    }
+  }
+
+  deployment {
+    "infrastructure.compute.web_server" maps_to "configuration.play.web_role"
+  }
+}

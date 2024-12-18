@@ -1,6 +1,6 @@
 # Cloudscript
 
-Cloudscript is an Infrastructure as Code (IaC) language designed to simplify the deployment and management of cloud resources, applications, and configurations. With Cloudscript, you can combine the functionality of Terraform, Ansible, and Kubernetes into a single, cohesive .cloud file for seamless orchestration.
+Cloudscript is an Infrastructure as Code (IaC) language designed to simplify the deployment and management of cloud resources, applications, and configurations. With Cloud, you can combine the functionality of Terraform, Ansible, and Kubernetes into a single, cohesive .cloud file for seamless orchestration.
 
 ## Key Features
 
@@ -47,7 +47,11 @@ Cloudscript is an Infrastructure as Code (IaC) language designed to simplify the
   - **Mappings**: Connect infrastructure components to configurations or services.
   - **Patterns**: Specify conditional logic for deployment based on tags or attributes.
 
-# Cloud CLI
+# Cloudscript CLI
+
+- **`cloud convert [file path]`**
+  - Converts your .cloud file into the appropriate Terraform, Ansible and Kubernetes files within an IaC directory.
+  - Ensures valid syntax for the .cloud file.
 
 - **`cloud validate [file path]`**
   - Validates the provided `cloud` file and offers suggestions for best practices.
@@ -69,7 +73,7 @@ Cloudscript is an Infrastructure as Code (IaC) language designed to simplify the
     - Provides deployment status for each component.
 
 - **`cloud destroy [file path]`**
-  - Tears down all resources defined in the `cloud` file.
+  - Tears down all resources defined in the `.cloud` file.
   - Destroys Terraform, Kubernetes, and Ansible-managed instances, ensuring a clean removal of all resources.
 
 ### **Requirements**
@@ -100,6 +104,9 @@ Cloudscript is an Infrastructure as Code (IaC) language designed to simplify the
 
 ### **Example Usage of CLI**
 ```bash
+# Convert a cloud file
+cloud convert my_infrastructure.cloud
+
 # Validate a cloud file
 cloud validate my_infrastructure.cloud
 

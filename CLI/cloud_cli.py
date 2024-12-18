@@ -1,5 +1,5 @@
 from typing import Dict, List, Optional, Tuple, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import click
 import hcl2
@@ -14,6 +14,23 @@ import sys
 import logging
 import traceback
 import time
+from .executors.plan import CloudPlanExecutor
+from .executors.apply import CloudApplyExecutor
+from .executors.destroy import CloudDestroyExecutor
+from .utils.file_preprocessing import preprocess_file_references, find_cloud_file
+from typing import List, Dict, Optional, Tuple
+from .error_mapping.error_mappers import *
+from rich.console import Console
+from rich.table import Table
+from rich.progress import Progress, SpinnerColumn, TextColumn
+
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
+
+from transpiler.main import convert_enhanced_hcl_to_standard
+from converter.main import main_convert
+
 
 class MessageType(Enum):
     INFO = "INFO"
@@ -37,6 +54,9 @@ class SourceCodeLocation:
     column: int
     block_type: str  # 'service', 'infrastructure', 'configuration', 'containers', etc.
     block_name: str  # name of the service, container, etc.
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
 
 @dataclass
 class ValidationMessage:
@@ -69,97 +89,267 @@ class CloudSourceMapper:
             content = f.read()
             lines = content.split('\n')
             
-        current_block = None
-        current_block_name = None
-        current_service = None
-        in_infrastructure = False
-        in_configuration = False
-        in_containers = False
+            current_block = None
+            current_block_name = None
+            block_stack = []
+            brace_count = 0
+            in_vpc_block = False
+            in_instance_block = False
+            in_providers_block = False
+            in_aws_block = False
+            instance_name = None
         
         for line_num, line in enumerate(lines, 1):
             stripped = line.strip()
+            
+            # Track block properties
+            if '=' in stripped:
+                # Extract property name
+                prop_name = stripped.split('=')[0].strip()
+                
+                if in_vpc_block:
+                    self._add_mapping(
+                        "aws_vpc.vpc.property",
+                        line_num,
+                        line.index(prop_name),
+                        'network',
+                        'vpc',
+                        {
+                            'property_name': prop_name,
+                            'original_line': stripped,
+                            'block_type': 'vpc'
+                        }
+                    )
+                elif in_instance_block and 'instance_name' in locals():
+                    self._add_mapping(
+                        f"aws_instance.{instance_name}.property",
+                        line_num,
+                        line.index(prop_name),
+                        'compute',
+                        instance_name,
+                        {
+                            'property_name': prop_name,
+                            'original_line': stripped,
+                            'block_type': 'instance'
+                        }
+                    )
+
+            # Track providers block
+            if stripped == 'providers {':
+                in_providers_block = True
+                continue
+                
+            if in_providers_block:
+                if stripped == 'aws {':
+                    in_aws_block = True
+                    continue
+                    
+                if in_aws_block:
+                    # Track AWS provider parameters
+                    if 'region' in stripped:
+                        region_match = re.search(r'region\s*=\s*"([^"]+)"', stripped)
+                        if region_match:
+                            self._add_mapping(
+                                "aws_provider.region",
+                                line_num,
+                                line.index('region'),
+                                'provider',
+                                'aws',
+                                {
+                                    'region': region_match.group(1),
+                                    'original_line': stripped
+                                }
+                            )
+                    elif 'provider' in stripped:
+                        provider_match = re.search(r'provider\s*=\s*"([^"]+)"', stripped)
+                        if provider_match:
+                            self._add_mapping(
+                                "aws_provider.name",
+                                line_num,
+                                line.index('provider'),
+                                'provider',
+                                'aws',
+                                {
+                                    'provider_name': provider_match.group(1),
+                                    'original_line': stripped
+                                }
+                            )
+                    
+                if stripped == '}':
+                    if in_aws_block:
+                        in_aws_block = False
+                    else:
+                        in_providers_block = False
+                        
+        # All possible parameters to track
+        vpc_params = [
+            'cidr_block', 'instance_tenancy', 'enable_dns_support', 'enable_dns_hostnames',
+            'enable_classiclink', 'enable_classiclink_dns_support', 'enable_network_address_usage_metrics',
+            'ipv6_cidr_block', 'ipv6_association_id', 'ipv6_cidr_block_network_border_group',
+            'dhcp_options_id', 'default_security_group_id', 'default_route_table_id',
+            'default_network_acl_id', 'main_route_table_id', 'owner_id', 'tags'
+        ]
+        
+        instance_params = [
+            'ami', 'instance_type', 'key_name', 'availability_zone', 'placement_group',
+            'subnet_id', 'vpc_security_group_ids', 'user_data', 'iam_instance_profile',
+            'associate_public_ip_address', 'private_ip', 'secondary_private_ips',
+            'ipv6_addresses', 'ebs_optimized', 'monitoring', 'source_dest_check',
+            'disable_api_termination', 'instance_initiated_shutdown_behavior',
+            'placement_partition_number', 'tenancy', 'host_id', 'cpu_core_count',
+            'cpu_threads_per_core', 'tags'
+        ]
+        
+        for line_num, line in enumerate(lines, 1):
+            stripped = line.strip()
+            
+            # Track braces for nested block handling
+            brace_count += stripped.count('{')
+            brace_count -= stripped.count('}')
             
             # Track service blocks
             if stripped.startswith('service'):
                 match = re.search(r'service\s+"([^"]+)"', stripped)
                 if match:
-                    current_service = match.group(1)
-                    self._add_mapping(f"service/{current_service}", 
+                    service_name = match.group(1)
+                    block_stack.append(('service', service_name))
+                    self._add_mapping(f"service/{service_name}", 
                                     line_num, line.index('service'), 
-                                    'service', current_service)
+                                    'service', service_name)
 
             # Track infrastructure section
             elif stripped == 'infrastructure {':
-                in_infrastructure = True
-                self._add_mapping(f"infrastructure/{current_service}",
+                current_block = 'infrastructure'
+                self._add_mapping(f"infrastructure/{block_stack[-1][1]}" if block_stack else "infrastructure/main",
                                 line_num, line.index('infrastructure'),
-                                'infrastructure', current_service)
+                                'infrastructure', block_stack[-1][1] if block_stack else 'main')
 
-            elif stripped == 'configuration {':
-                in_configuration = True
-                self._add_mapping(f"configuration/{current_service}",
-                                line_num, line.index('configuration'),
-                                'configuration', current_service)
+            # Track VPC block
+            elif current_block == 'infrastructure' and 'network' in stripped.lower() and '{' in stripped:
+                in_vpc_block = True
+                vpc_start_line = line_num
+            elif in_vpc_block:
+                # Track all VPC parameters
+                for param in vpc_params:
+                    if param in stripped:
+                        value_match = re.search(rf'{param}\s*=\s*"([^"]*)"', stripped)
+                        if value_match:
+                            self._add_mapping(
+                                "aws_vpc.vpc",
+                                line_num,
+                                line.index(param),
+                                'network',
+                                'vpc',
+                                {
+                                    'parameter': param,
+                                    'value': value_match.group(1),
+                                    'vpc_start_line': vpc_start_line,
+                                    'original_line': stripped
+                                }
+                            )
+                if '}' in stripped:
+                    in_vpc_block = False
 
-            elif stripped.startswith('containers'):
-                in_containers = True
-                self._add_mapping(f"containers/{current_service}",
-                                line_num, line.index('containers'),
-                                'containers', current_service)
+            # Track Instance block
+            elif current_block == 'infrastructure' and 'compute' in stripped.lower() and '{' in stripped:
+                in_instance_block = True
+                instance_start_line = line_num
+                instance_name_match = re.search(r'name\s*=\s*"([^"]*)"', stripped)
+                instance_name = instance_name_match.group(1) if instance_name_match else "instance"
+            elif in_instance_block:
+                # Track all Instance parameters
+                for param in instance_params:
+                    if param in stripped:
+                        value_match = re.search(rf'{param}\s*=\s*"([^"]*)"', stripped)
+                        if value_match:
+                            self._add_mapping(
+                                f"aws_instance.{instance_name}",
+                                line_num,
+                                line.index(param),
+                                'compute',
+                                instance_name,
+                                {
+                                    'parameter': param,
+                                    'value': value_match.group(1),
+                                    'instance_start_line': instance_start_line,
+                                    'original_line': stripped
+                                }
+                            )
+                if '}' in stripped:
+                    in_instance_block = False
 
-            # Track compute instances
-            elif in_infrastructure and 'type = Instance' in stripped:
-                instance_context = '\n'.join(lines[max(0, line_num-3):min(len(lines), line_num+3)])
-                name_match = re.search(r'name\s*=\s*"([^"]+)"', instance_context)
-                if name_match:
-                    instance_name = name_match.group(1)
-                    self._add_mapping(f"aws_instance.{instance_name}",
-                                    line_num, line.index('type'),
-                                    'compute', instance_name)
-                    # Map security group if present
-                    if 'security_groups' in instance_context:
-                        self._add_mapping(f"aws_security_group.{instance_name}",
-                                        line_num, line.index('security_groups'),
-                                        'security_group', instance_name)
-
-            # Track containers
-            elif in_containers and 'name = ' in stripped:
-                name_match = re.search(r'name\s*=\s*"([^"]+)"', stripped)
-                if name_match:
-                    container_name = name_match.group(1)
-                    self._add_mapping(f"container/{container_name}",
-                                    line_num, line.index('name'),
-                                    'container', container_name)
-                    # Also map the Kubernetes deployment
-                    self._add_mapping(f"Deployment/{container_name}",
-                                    line_num, line.index('name'),
-                                    'deployment', container_name)
-
-            # Track block ends
-            elif stripped == '}':
-                if in_containers:
-                    in_containers = False
-                elif in_configuration:
-                    in_configuration = False
-                elif in_infrastructure:
-                    in_infrastructure = False
-                else:
-                    current_service = None
+            # Check if we're exiting the current block
+            if '}' in stripped:
+                if brace_count == 0:
+                    current_block = None
+                    if block_stack:
+                        block_stack.pop()
 
     def _add_mapping(self, resource_id: str, line: int, column: int, 
-                    block_type: str, block_name: str):
-        """Add a source mapping for a resource"""
-        self.source_map[resource_id] = SourceCodeLocation(
+                    block_type: str, block_name: str, metadata: dict = None):
+        """Add a source mapping for a resource with additional metadata"""
+        # Create mapping key that includes parameter name if present
+        mapping_key = resource_id
+        if metadata and 'parameter' in metadata:
+            mapping_key = f"{resource_id}.{metadata['parameter']}"
+            
+        self.source_map[mapping_key] = SourceCodeLocation(
             file=self.cloud_file_path,
             line=line,
             column=column,
             block_type=block_type,
-            block_name=block_name
+            block_name=block_name,
+            metadata=metadata or {}
         )
 
+    def get_infrastructure_line(self, resource_type: str, value: str) -> Optional[SourceCodeLocation]:
+        """Find line number for a specific infrastructure configuration value"""
+        if resource_type == 'vpc':
+            # Check all VPC parameter mappings
+            for mapping_key, location in self.source_map.items():
+                if mapping_key.startswith('aws_vpc.vpc.') and location.metadata.get('value') == value:
+                    return location
+        elif resource_type == 'instance':
+            # Check all instance parameter mappings
+            for mapping_key, location in self.source_map.items():
+                if mapping_key.startswith('aws_instance.') and location.metadata.get('value') == value:
+                    return location
+        return None
+
     def get_source_location(self, resource_id: str) -> Optional[SourceCodeLocation]:
-        """Get source location for a resource ID"""
-        return self.source_map.get(resource_id)
+        """Get source location for a resource ID with rich error context"""
+        # First try exact match
+        location = self.source_map.get(resource_id)
+        
+        if not location:
+            # Try to find parameter-specific mapping
+            for mapping_key, loc in self.source_map.items():
+                if mapping_key.startswith(resource_id + '.'):
+                    location = loc
+                    break
+        
+        if location:
+            # Handle context for VPC resources
+            if resource_id.startswith('aws_vpc.vpc'):
+                with open(self.cloud_file_path, 'r') as f:
+                    lines = f.readlines()
+                    start_line = location.metadata.get('vpc_start_line', location.line)
+                    context = ''.join(lines[start_line-1:location.line])
+                    location.metadata['block_context'] = context
+            # Handle context for Instance resources
+            elif resource_id.startswith('aws_instance.'):
+                with open(self.cloud_file_path, 'r') as f:
+                    lines = f.readlines()
+                    start_line = location.metadata.get('instance_start_line', location.line)
+                    context = ''.join(lines[start_line-1:location.line])
+                    location.metadata['block_context'] = context
+            return location
+        return None
+
+    def get_param_location(self, resource_id: str, param_name: str) -> Optional[SourceCodeLocation]:
+        """Get source location for a specific parameter of a resource"""
+        mapping_key = f"{resource_id}.{param_name}"
+        return self.source_map.get(mapping_key)
 
     def _suggest_kubernetes_fix(self, issue: ValidationMessage) -> str:
         """Generate suggestions for Kubernetes-related issues"""
@@ -618,791 +808,6 @@ class CloudOrchestrator:
         
         return messages
 
-
-    def _get_terraform_plan(self) -> List[str]:
-        """Get formatted Terraform plan output"""
-        tfvars_path = None
-        try:
-            def format_terraform_output(line: str) -> str:
-                """Format output as CLOUD comment with terraform word removed"""
-                # Remove ANSI color codes and trim
-                line = re.sub(r'\x1b\[[0-9;]*m', '', line.strip())
-                if not line:
-                    return None
-                    
-                # Remove the word "terraform" (case insensitive)
-                line = re.sub(r'terraform\s+', '', line, flags=re.IGNORECASE)
-                
-                # Replace symbols with cleaner text
-                line = line.replace('+ ', 'Will create ')
-                line = line.replace('- ', 'Will destroy ')
-                line = line.replace('~ ', 'Will modify ')
-                line = line.replace('# ', '')
-                
-                # Skip lines that are just provider info or lock file info
-                if any(skip in line.lower() for skip in 
-                    ['used the selected providers',
-                    'has created a lock file',
-                    'note: objects have changed']):
-                    return None
-                    
-                # If it's a change line but not a resource declaration, indent it
-                if (line.startswith('Will ') and 
-                    not any(x in line.lower() for x in ['resource', 'data', 'module'])):
-                    return f"CLOUD:   {line}"
-                    
-                return f"CLOUD: {line}"
-
-            # Create tfvars file
-            tfvars_content = {
-                'aws_region': 'us-west-2',
-                'assume_role_arn': ''
-            }
-            
-            tfvars_path = os.path.join(self.iac_path, 'terraform.tfvars.json')
-            with open(tfvars_path, 'w') as f:
-                json.dump(tfvars_content, f, indent=2)
-
-            changes = []
-            
-            # Run terraform init
-            init_result = subprocess.run(
-                ['terraform', 'init'],
-                cwd=self.iac_path,
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=30
-            )
-            
-            # Format initialization output
-            for line in init_result.stdout.split('\n'):
-                if line.strip():
-                    if "successfully initialized" in line.lower():
-                        changes.append(format_cloud_message("CLOUD: Initialization complete"))
-                    elif "Installing" in line or "installed" in line:
-                        formatted = format_terraform_output(line)
-                        if formatted:
-                            changes.append(format_cloud_message(formatted))
-            
-            # Run terraform plan
-            plan_result = subprocess.run(
-                ['terraform', 'plan', '-no-color', '-var-file=terraform.tfvars.json'],
-                cwd=self.iac_path,
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=60
-            )
-            
-            # Process plan output
-            for line in plan_result.stdout.split('\n'):
-                if line.strip():
-                    formatted = format_terraform_output(line)
-                    if formatted:
-                        changes.append(format_cloud_message(formatted))
-            
-            # If no changes were found, add a summary
-            if not any('Will ' in change for change in changes):
-                changes.append(format_cloud_message("CLOUD: No infrastructure changes required"))
-            else:
-                changes.append(format_cloud_message("CLOUD: Infrastructure changes detected"))
-                
-            return changes
-            
-        except subprocess.TimeoutExpired:
-            return ["CLOUD ERROR: Operation timed out"]
-        except subprocess.CalledProcessError as e:
-            error_msg = e.stderr if e.stderr else "Unknown error occurred"
-            # Remove word terraform from error message too
-            error_msg = re.sub(r'terraform\s+', '', error_msg, flags=re.IGNORECASE)
-            return [f"CLOUD ERROR: {error_msg}"]
-        except Exception as e:
-            error_msg = str(e)
-            # Remove word terraform from error message too
-            error_msg = re.sub(r'terraform\s+', '', error_msg, flags=re.IGNORECASE)
-            return [f"CLOUD ERROR: {error_msg}"]
-        finally:
-            # Clean up tfvars file
-            if tfvars_path and os.path.exists(tfvars_path):
-                try:
-                    os.remove(tfvars_path)
-                except Exception:
-                    pass
-
-    def _get_kubernetes_plan(self) -> List[str]:
-        """Get formatted Kubernetes plan output"""
-        changes = []
-        
-        def format_kubectl_output(output_line: str) -> str:
-            """Format kubectl output into CLOUD comments"""
-            line = re.sub(r'\x1b\[[0-9;]*m', '', output_line).strip()
-            if not line:
-                return None
-                
-            # Extract resource info
-            resource_match = re.search(r'(deployment|service|pod|configmap|secret)\.?(?:[^\s]+)?\s+"([^"]+)"', line, re.IGNORECASE)
-            
-            if resource_match:
-                resource_type, name = resource_match.groups()
-                
-                if "created" in line.lower():
-                    return f"CLOUD: Would create {resource_type} '{name}' in containers.app.web_frontend"
-                elif "configured" in line.lower():
-                    return f"CLOUD: Would update {resource_type} '{name}' in containers.app.web_frontend"
-                elif "unchanged" in line.lower():
-                    return f"CLOUD: No changes needed for {resource_type} '{name}'"
-                elif "deleted" in line.lower():
-                    return f"CLOUD: Would delete {resource_type} '{name}'"
-                    
-            # Handle validation errors
-            if "error" in line.lower():
-                error_type = None
-                if "resources" in line.lower():
-                    error_type = "resource configuration"
-                elif "probe" in line.lower() or "health" in line.lower():
-                    error_type = "health check configuration"
-                elif "port" in line.lower():
-                    error_type = "port configuration"
-                elif "env" in line.lower():
-                    error_type = "environment variables"
-                    
-                if error_type:
-                    return f"CLOUD ERROR: Invalid {error_type} in containers.app.web_frontend"
-                return f"CLOUD ERROR: {line}"
-
-            return None
-
-        try:
-            # Check if minikube is already running
-            try:
-                subprocess.run(['minikube', 'status'], 
-                            check=True,
-                            capture_output=True,
-                            timeout=10)  # 10 second timeout
-                changes.append(format_cloud_message("CLOUD: Using existing Kubernetes cluster"))
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-                # Try to stop any existing cluster first
-                try:
-                    subprocess.run(['minikube', 'stop'], 
-                                check=False,  # Don't check return code
-                                capture_output=True,
-                                timeout=30)
-                except Exception:
-                    pass  # Ignore any errors here
-
-                changes.append(format_cloud_message("CLOUD: Starting new Kubernetes cluster"))
-                try:
-                    # Start minikube with a timeout
-                    subprocess.run(['minikube', 'start', '--wait=false'], 
-                                check=True,
-                                capture_output=True,
-                                timeout=60)  # 60 second timeout
-                except subprocess.TimeoutExpired:
-                    return ["CLOUD ERROR: Timeout while starting Kubernetes cluster"]
-                except subprocess.CalledProcessError as e:
-                    return [f"CLOUD ERROR: Failed to start Kubernetes cluster: {e.stderr.decode() if e.stderr else ''}"]
-
-            # Wait for cluster to be ready
-            max_retries = 5
-            retry_delay = 2
-            for i in range(max_retries):
-                try:
-                    # Try to validate cluster is responding
-                    subprocess.run(['kubectl', 'get', 'nodes'], 
-                                check=True,
-                                capture_output=True,
-                                timeout=10)
-                    changes.append(format_cloud_message("CLOUD: Kubernetes cluster is ready"))
-                    break
-                except Exception:
-                    if i == max_retries - 1:
-                        return ["CLOUD ERROR: Kubernetes cluster failed to become ready"]
-                    time.sleep(retry_delay)
-
-            # Now do the validation
-            changes.append(format_cloud_message("CLOUD: Validating Kubernetes configuration"))
-            
-            # Client-side validation
-            try:
-                result = subprocess.run(
-                    ['kubectl', 'apply', '--dry-run=client', '-f', self.configs['kubernetes'].path],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    timeout=30
-                )
-                
-                for line in result.stdout.split('\n'):
-                    formatted = format_kubectl_output(line)
-                    if formatted:
-                        changes.append(format_cloud_message(formatted))
-                        
-            except subprocess.TimeoutExpired:
-                return ["CLOUD ERROR: Timeout during configuration validation"]
-            except subprocess.CalledProcessError as e:
-                error_msg = e.stderr if e.stderr else "Unknown error during validation"
-                return [f"CLOUD ERROR: {error_msg}"]
-
-            # Only do server-side validation if client-side passes
-            if not any("ERROR" in change for change in changes):
-                try:
-                    result = subprocess.run(
-                        ['kubectl', 'apply', '--dry-run=server', '-f', self.configs['kubernetes'].path],
-                        capture_output=True,
-                        text=True,
-                        check=True,
-                        timeout=30
-                    )
-                    
-                    for line in result.stdout.split('\n'):
-                        formatted = format_kubectl_output(line)
-                        if formatted:
-                            changes.append(format_cloud_message(formatted))
-                            
-                except subprocess.TimeoutExpired:
-                    return ["CLOUD ERROR: Timeout during server validation"]
-                except subprocess.CalledProcessError as e:
-                    error_msg = e.stderr if e.stderr else "Unknown error during server validation"
-                    return [f"CLOUD ERROR: {error_msg}"]
-
-            if not any("ERROR" in change for change in changes):
-                changes.append(format_cloud_message("CLOUD: Kubernetes configuration is valid"))
-
-        except FileNotFoundError:
-            return ["CLOUD ERROR: Required tools (minikube or kubectl) not found"]
-        except Exception as e:
-            return [f"CLOUD ERROR: Unexpected error: {str(e)}"]
-        finally:
-            try:
-                # Don't stop the cluster, just let user know we're keeping it running
-                changes.append(format_cloud_message("CLOUD: Keeping Kubernetes cluster running for future operations"))
-            except Exception:
-                pass
-
-        return changes
-
-    def _get_ansible_plan(self) -> List[str]:
-        """Get formatted Ansible plan output using ansible's built-in validation"""
-        inventory_path = None  # Define this at the start
-        try:
-            # Find ansible-playbook and ansible-lint
-            ansible_playbook_path = None
-            ansible_lint_path = None
-            
-            # Check common system paths and virtualenv path
-            potential_paths = [
-                os.path.join(sys.prefix, 'bin', 'ansible-playbook'),  # virtualenv path
-                '/usr/local/bin/ansible-playbook',
-                '/usr/bin/ansible-playbook', 
-                '/opt/homebrew/bin/ansible-playbook'
-            ]
-            
-            for path in potential_paths:
-                if os.path.isfile(path):
-                    ansible_playbook_path = path
-                    break
-                    
-            if not ansible_playbook_path:
-                # Try using which command as fallback
-                try:
-                    ansible_playbook_path = subprocess.check_output(['which', 'ansible-playbook'], 
-                                                                text=True).strip()
-                except subprocess.CalledProcessError:
-                    return ["CLOUD ERROR: Ansible not installed. Required for server configuration."]
-                    
-            def format_as_cloud_comment(output_line: str) -> str:
-                """Formats ansible output as standardized CLOUD comment"""
-                # Strip ANSI color codes
-                line = re.sub(r'\x1b\[[0-9;]*m', '', output_line)
-                line = line.strip()
-                
-                if not line:
-                    return None
-                    
-                # Standardize task names
-                if "TASK [" in line:
-                    task_name = re.search(r'TASK \[(.*?)\]', line)
-                    if task_name:
-                        return f"CLOUD: Executing {task_name.group(1)}"
-                        
-                # Standardize changes
-                if "changed:" in line:
-                    return f"CLOUD: Making change: {line.split('changed:')[1].strip()}"
-                    
-                # Standardize skipped tasks
-                if "skipping:" in line:
-                    return f"CLOUD: Skipping: {line.split('skipping:')[1].strip()}"
-                    
-                # Standardize ok/success messages
-                if "ok:" in line or "success" in line.lower():
-                    return f"CLOUD: Success: {line.split(':')[1].strip()}"
-                    
-                # Handle verification outputs
-                if "Verify" in line:
-                    return f"CLOUD: Verifying: {line}"
-                    
-                # Handle installation messages
-                if "Installing" in line:
-                    return f"CLOUD: Installing: {line.split('Installing')[1].strip()}"
-                    
-                # Handle configuration messages
-                if "Configuring" in line:
-                    return f"CLOUD: Configuring: {line.split('Configuring')[1].strip()}"
-                    
-                # Handle errors and warnings
-                if "ERROR" in line.upper() or "WARN" in line.upper():
-                    return f"CLOUD ERROR: {line}"
-                    
-                # Debug messages
-                if "DEBUG" in line:
-                    msg = line.split('DEBUG', 1)[1].strip()
-                    # Remove the "msg:" prefix if it exists
-                    msg = msg.replace("msg:", "").strip()
-                    return f"CLOUD DEBUG: {msg}"
-                    
-                # Default format for other lines
-                return f"CLOUD: {line}"
-
-            changes = []
-
-            # Create temporary inventory file
-            inventory_path = os.path.join(self.iac_path, 'inventory.ini')
-            with open(inventory_path, 'w') as f:
-                f.write("localhost ansible_connection=local\n[all]\nlocalhost")
-
-            # Add a line break before password prompt
-            print("\n", flush=True)
-            
-            # Get sudo password with custom prompt
-            sudo_pass = click.prompt('Sudo password',
-                                hide_input=True,
-                                type=str)
-
-            # Set up environment with sudo password
-            env = os.environ.copy()
-            env['ANSIBLE_BECOME_PASS'] = sudo_pass
-            
-            # Run ansible-playbook check
-            process = subprocess.Popen(
-                [
-                    ansible_playbook_path,
-                    '--check',
-                    '--diff',
-                    '-i', inventory_path,
-                    self.configs['ansible'].path
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=env
-            )
-            
-            # Get the output
-            stdout, stderr = process.communicate()
-            
-            # Process all output and convert to CLOUD format
-            if stderr:
-                # Process error lines
-                for line in stderr.split('\n'):
-                    if line.strip() and "Python interpreter" not in line:
-                        formatted = format_as_cloud_comment(line)
-                        if formatted:
-                            changes.append(format_cloud_message(formatted))
-            
-            if stdout:
-                # Process standard output lines
-                for line in stdout.split('\n'):
-                    # Skip unnecessary lines
-                    if any(skip in line for skip in ['PLAY [', 'PLAY RECAP', 'GATHERING FACTS']):
-                        continue
-                        
-                    if line.strip():
-                        formatted = format_as_cloud_comment(line)
-                        if formatted:
-                            changes.append(format_cloud_message(formatted))
-            
-            # If no changes detected, add a summary
-            if not changes:
-                changes.append(format_cloud_message("CLOUD: No changes required in configuration"))
-            else:
-                # Add a summary at the end
-                changes.append(format_cloud_message("CLOUD: Configuration validation complete"))
-                
-            return changes
-
-        except Exception as e:
-            return [f"CLOUD ERROR: {str(e)}"]
-            
-        finally:
-            # Clean up temporary inventory file
-            if inventory_path and os.path.exists(inventory_path):
-                try:
-                    os.remove(inventory_path)
-                except Exception:
-                    pass  # Ignore cleanup errors
-    
-    def _format_resource_line(self, line: str) -> str:
-        """Format a resource line from Terraform plan"""
-        parts = line.strip().split(' ')
-        if len(parts) >= 3:
-            resource_type = parts[1]
-            resource_name = parts[2].strip('"')
-            return f"{resource_type}.{resource_name}"
-        return line.strip()
-
-    def _format_attribute_line(self, line: str) -> str:
-        """Format an attribute line from Terraform plan"""
-        parts = line.strip().split(' = ')
-        if len(parts) >= 2:
-            attr_name = parts[0].strip('+ - ~ ')
-            attr_value = parts[1]
-            return f"{attr_name} = {attr_value}"
-        return line.strip()
-
-    def _format_kubernetes_line(self, line: str) -> str:
-        """Format a Kubernetes resource line"""
-        parts = line.split('/')
-        if len(parts) >= 2:
-            resource_type = parts[0].strip()
-            resource_name = '/'.join(parts[1:]).split(' ')[0]
-            return f"{resource_type}/{resource_name}"
-        return line.strip()
-
-    def _parse_ansible_stats(self, line: str) -> dict:
-        """Parse Ansible stats line"""
-        stats = {
-            'changed': 0,
-            'failed': 0,
-            'unreachable': 0
-        }
-        
-        parts = line.split(':')[1].split()
-        for part in parts:
-            if '=' in part:
-                key, value = part.split('=')
-                if key in stats:
-                    stats[key] = int(value)
-        
-        return stats
-
-    def apply_terraform(self) -> List[str]:
-        """Apply Terraform changes with immediate output"""
-        tfvars_path = None
-        changes = []
-        try:
-            # Create tfvars file with default values
-            tfvars_content = {
-                'aws_region': 'us-west-2',
-                'assume_role_arn': ''
-            }
-            
-            tfvars_path = os.path.join(self.iac_path, 'terraform.tfvars.json')
-            with open(tfvars_path, 'w') as f:
-                json.dump(tfvars_content, f, indent=2)
-
-            # Print initial message
-            msg = format_cloud_message("Starting infrastructure deployment")
-            print(msg)
-            changes.append(msg)
-            
-            process = subprocess.Popen(
-                ['terraform', 'apply', '-auto-approve', '-no-color', '-var-file=terraform.tfvars.json'],
-                cwd=self.iac_path,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                universal_newlines=True
-            )
-
-            # Stream stdout in real-time
-            while True:
-                line = process.stdout.readline()
-                if not line and process.poll() is not None:
-                    break
-                
-                line = line.strip()
-                if line:
-                    # Skip noisy lines
-                    if any(skip in line.lower() for skip in 
-                        ['terraform will perform',
-                        'terraform used provider',
-                        'terraform has made some changes',
-                        'enter a value']):
-                        continue
-                    
-                    # Remove the word terraform and format
-                    line = re.sub(r'terraform\s+', '', line, flags=re.IGNORECASE)
-                    
-                    if "Apply complete!" in line:
-                        stats = re.search(r'(\d+)\s+added,\s+(\d+)\s+changed,\s+(\d+)\s+destroyed', line)
-                        if stats:
-                            added, changed, destroyed = stats.groups()
-                            if int(added) > 0:
-                                msg = format_cloud_message(f"Added {added} resources")
-                                print(msg)
-                                changes.append(msg)
-                            if int(changed) > 0:
-                                msg = format_cloud_message(f"Modified {changed} resources")
-                                print(msg)
-                                changes.append(msg)
-                            if int(destroyed) > 0:
-                                msg = format_cloud_message(f"Removed {destroyed} resources")
-                                print(msg)
-                                changes.append(msg)
-                    elif any(action in line for action in ["Creating", "Modifying", "Destroying"]):
-                        msg = format_cloud_message(line)
-                        print(msg)
-                        changes.append(msg)
-                    elif "still creating" in line.lower():
-                        msg = format_cloud_message(f"Still creating... {line}")
-                        print(msg)
-                        changes.append(msg)
-                    elif "completed" in line.lower():
-                        msg = format_cloud_message(line)
-                        print(msg)
-                        changes.append(msg)
-
-            # Check for any errors in stderr
-            for line in process.stderr.readlines():
-                line = line.strip()
-                if line:
-                    error_msg = re.sub(r'terraform\s+', '', line, flags=re.IGNORECASE)
-                    msg = format_cloud_message(f"ERROR: {error_msg}")
-                    print(msg)
-                    changes.append(msg)
-
-            # Check final process status
-            if process.returncode != 0:
-                msg = format_cloud_message("ERROR: Infrastructure deployment failed")
-                print(msg)
-                changes.append(msg)
-            else:
-                if not any("Added" in change or "Modified" in change or "Removed" in change for change in changes):
-                    msg = format_cloud_message("No changes were applied")
-                    print(msg)
-                    changes.append(msg)
-                msg = format_cloud_message("Infrastructure deployment complete")
-                print(msg)
-                changes.append(msg)
-            
-            return changes
-
-        except Exception as e:
-            error_msg = str(e)
-            error_msg = re.sub(r'terraform\s+', '', error_msg, flags=re.IGNORECASE)
-            msg = format_cloud_message(f"ERROR: {error_msg}")
-            print(msg)
-            return [msg]
-        finally:
-            # Clean up tfvars file
-            if tfvars_path and os.path.exists(tfvars_path):
-                try:
-                    os.remove(tfvars_path)
-                except Exception:
-                    pass
-
-    def apply_kubernetes(self) -> List[str]:
-        """Apply Kubernetes resources with formatted output"""
-        changes = []
-        
-        # First verify if kubectl is installed
-        try:
-            subprocess.run(['kubectl', 'version', '--client'], 
-                        capture_output=True, check=True)
-            msg = format_cloud_message("kubectl verification successful")
-            print(msg)
-            changes.append(msg)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            msg = format_cloud_message("ERROR: kubectl not installed")
-            print(msg)
-            return [msg]
-            
-        # Check if minikube is installed and running
-        try:
-            minikube_status = subprocess.run(['minikube', 'status'], 
-                                        capture_output=True, text=True)
-            if minikube_status.returncode != 0:
-                # Start minikube if it's not running
-                msg = format_cloud_message("Starting Kubernetes cluster...")
-                print(msg)
-                changes.append(msg)
-                
-                process = subprocess.Popen(
-                    ['minikube', 'start'],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    universal_newlines=True
-                )
-                
-                # Stream minikube start output
-                for line in process.stdout:
-                    if line.strip():
-                        msg = format_cloud_message(line.strip())
-                        print(msg)
-                        changes.append(msg)
-                        
-                if process.wait() == 0:
-                    msg = format_cloud_message("Kubernetes cluster started successfully")
-                    print(msg)
-                    changes.append(msg)
-                else:
-                    msg = format_cloud_message("ERROR: Failed to start Kubernetes cluster")
-                    print(msg)
-                    return [msg]
-                    
-        except FileNotFoundError:
-            msg = format_cloud_message("ERROR: minikube not installed")
-            print(msg)
-            return [msg]
-                
-        try:
-            # Do client-side validation first
-            msg = format_cloud_message("Validating Kubernetes configuration...")
-            print(msg)
-            changes.append(msg)
-            
-            result = subprocess.run(
-                ['kubectl', 'apply', '--dry-run=client', '-f', self.configs['kubernetes'].path],
-                capture_output=True, text=True, check=True
-            )
-            msg = format_cloud_message("Client-side validation successful")
-            print(msg)
-            changes.append(msg)
-            
-            # Then do server-side validation
-            result = subprocess.run(
-                ['kubectl', 'apply', '--dry-run=server', '-f', self.configs['kubernetes'].path],
-                capture_output=True, text=True, check=True
-            )
-            msg = format_cloud_message("Server-side validation successful")
-            print(msg)
-            changes.append(msg)
-            
-            # Actually apply the resources
-            msg = format_cloud_message("Applying Kubernetes resources...")
-            print(msg)
-            changes.append(msg)
-            
-            process = subprocess.Popen(
-                ['kubectl', 'apply', '-f', self.configs['kubernetes'].path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                universal_newlines=True
-            )
-            
-            # Stream the apply output
-            for line in process.stdout:
-                if line.strip():
-                    if 'created' in line.lower():
-                        msg = format_cloud_message(f"Created {line.split()[0]}")
-                    elif 'configured' in line.lower():
-                        msg = format_cloud_message(f"Updated {line.split()[0]}")
-                    elif 'unchanged' in line.lower():
-                        msg = format_cloud_message(f"Unchanged {line.split()[0]}")
-                    else:
-                        msg = format_cloud_message(line.strip())
-                    print(msg)
-                    changes.append(msg)
-            
-            if process.wait() != 0:
-                error_output = process.stderr.read()
-                msg = format_cloud_message(f"ERROR: Failed to apply resources: {error_output}")
-                print(msg)
-                return [msg]
-            
-            msg = format_cloud_message("Kubernetes resources deployed successfully")
-            print(msg)
-            changes.append(msg)
-            
-            return changes
-            
-        except subprocess.CalledProcessError as e:
-            if "connection refused" in str(e.stderr).lower():
-                msg = format_cloud_message("ERROR: Cannot connect to Kubernetes cluster")
-                print(msg)
-                return [msg]
-            msg = format_cloud_message(f"ERROR: {e.stderr}")
-            print(msg)
-            return [msg]
-    
-    def apply_ansible(self) -> List[str]:
-        """Apply Ansible changes with formatted output"""
-        changes = []
-        try:
-            msg = format_cloud_message("Starting configuration deployment")
-            print(msg)
-            changes.append(msg)
-
-            # Run ansible-playbook with streaming output
-            process = subprocess.Popen(
-                ['ansible-playbook', self.configs['ansible'].path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                universal_newlines=True
-            )
-
-            # Stream stdout in real-time
-            while True:
-                line = process.stdout.readline()
-                if not line and process.poll() is not None:
-                    break
-                
-                line = line.strip()
-                if line:
-                    # Skip unnecessary lines
-                    if any(skip in line for skip in ['PLAY RECAP', 'GATHERING FACTS']):
-                        continue
-                        
-                    # Format special cases
-                    if "TASK [" in line:
-                        task_name = re.search(r'TASK \[(.*?)\]', line)
-                        if task_name:
-                            msg = format_cloud_message(f"Running task: {task_name.group(1)}")
-                    elif "ok:" in line:
-                        msg = format_cloud_message(f"Completed: {line.split('ok:')[1].strip()}")
-                    elif "changed:" in line:
-                        msg = format_cloud_message(f"Modified: {line.split('changed:')[1].strip()}")
-                    elif "skipping:" in line:
-                        msg = format_cloud_message(f"Skipped: {line.split('skipping:')[1].strip()}")
-                    elif "failed:" in line:
-                        msg = format_cloud_message(f"ERROR: {line.split('failed:')[1].strip()}")
-                    else:
-                        msg = format_cloud_message(line)
-                    
-                    print(msg)
-                    changes.append(msg)
-
-            # Check for any errors in stderr
-            error_output = process.stderr.read()
-            if error_output:
-                for line in error_output.split('\n'):
-                    if line.strip():
-                        msg = format_cloud_message(f"ERROR: {line.strip()}")
-                        print(msg)
-                        changes.append(msg)
-
-            # Check final status
-            if process.returncode == 0:
-                msg = format_cloud_message("Configuration deployment completed successfully")
-                print(msg)
-                changes.append(msg)
-                return changes
-            else:
-                msg = format_cloud_message("ERROR: Configuration deployment failed")
-                print(msg)
-                changes.append(msg)
-                return changes
-
-        except Exception as e:
-            msg = format_cloud_message(f"ERROR: {str(e)}")
-            print(msg)
-            return [msg]
-        
     def destroy_terraform(self) -> List[str]:
         """Destroy Terraform resources with proper var handling"""
         tfvars_path = None
@@ -1577,17 +982,6 @@ def format_message(msg: ValidationMessage) -> str:
     
     return base
 
-def format_plan_output(plan_messages: List[str], title: str, color: str) -> str:
-    """Format plan output with consistent styling"""
-    output = [click.style(f"\n=== {title} ===", fg=color, bold=True)]
-    
-    for msg in plan_messages:
-        if msg.startswith(('➕', '📝', '➖')):
-            output.append(click.style(msg, fg=color))
-        else:
-            output.append(f"  {msg}")
-    
-    return '\n'.join(output)
 
 def print_validation_summary(messages: List[ValidationMessage]):
     """Print a summary of validation results"""
@@ -1606,62 +1000,6 @@ def print_validation_summary(messages: List[ValidationMessage]):
         click.echo(click.style("\n⚠ Validation completed with warnings. Review them before proceeding.", fg="yellow"))
     else:
         click.echo(click.style("\n✓ All validations passed successfully!", fg="green", bold=True))
-
-
-def parse_terraform_changes(tf_changes: List[str]) -> int:
-    """Count actual Terraform plan changes"""
-    count = 0
-    for line in tf_changes:
-        # Count resource changes (create, modify, destroy)
-        if line.strip().startswith(('➕ Create:', '📝 Modify:', '➖ Destroy:')):
-            count += 1
-        # Count errors
-        elif line.strip().startswith('Error:'):
-            count += 1
-    return count
-
-def parse_kubernetes_changes(k8s_changes: List[str]) -> int:
-    """Count actual Kubernetes changes"""
-    count = 0
-    for line in k8s_changes:
-        # Count actual resource changes/validations
-        if line.strip().startswith(('➕ Create:', '📝 Configure:', '✓ ')):
-            count += 1
-        # Count errors
-        elif line.strip().startswith('Error:'):
-            count += 1
-    return count
-
-def parse_ansible_changes(ansible_changes: List[str]) -> int:
-    """Count actual Ansible changes and errors"""
-    count = 0
-    in_play_recap = False
-    
-    for line in ansible_changes:
-        line = line.strip()
-        # Count failed tasks
-        if 'failed:' in line and '[' not in line:  # Avoid counting the play recap line
-            count += 1
-        # Count errors
-        elif line.startswith(('❌', '⚠️')):
-            count += 1
-        # Count actual changes from check output
-        elif line.startswith('changed:'):
-            count += 1
-    return count
-
-def print_plan_summary(tf_changes: List[str], k8s_changes: List[str], ansible_changes: List[str]):
-    """Print a summary of planned changes"""
-    tf_count = parse_terraform_changes(tf_changes)
-    k8s_count = parse_kubernetes_changes(k8s_changes)
-    ansible_count = parse_ansible_changes(ansible_changes)
-    total_changes = tf_count + k8s_count + ansible_count
-    
-    click.echo("\n=== Plan Summary ===")
-    click.echo(f"Terraform Changes: {click.style(str(tf_count), fg='blue')}")
-    click.echo(f"Kubernetes Changes: {click.style(str(k8s_count), fg='cyan')}")
-    click.echo(f"Ansible Changes: {click.style(str(ansible_count), fg='green')}")
-    click.echo(f"Total Changes: {click.style(str(total_changes), fg='yellow', bold=True)}")
 
 def confirm_destruction() -> bool:
     """Get confirmation for destroying resources"""
@@ -1714,11 +1052,155 @@ def get_resource_changes(before: dict, after: dict) -> List[str]:
                 changes.append(f"📝 Modify {resource_type}.{name}")
     
     return changes
-    
+
+
+def display_plan_results(changes: List[str], errors: List[CloudError], console: Console):
+    """Display the plan results in a formatted table"""
+    # Display errors first if any
+    if errors:
+        console.print("\n[red]Errors found during planning:[/red]")
+        error_table = Table(show_header=True)
+        error_table.add_column("Severity")
+        error_table.add_column("Location")
+        error_table.add_column("Message")
+        error_table.add_column("Suggestion")
+        
+        for error in errors:
+            # Format location with line number and context
+            location_str = ""
+            if error.source_location:
+                location_base = f"{error.source_location.block_type}:{error.source_location.line}"
+                
+                # Include original content if available
+                if hasattr(error.source_location, 'metadata') and error.source_location.metadata:
+                    original_line = error.source_location.metadata.get('original_line', '')
+                    if original_line:
+                        # Truncate line content if too long
+                        if len(original_line) > 30:
+                            original_line = original_line[:27] + "..."
+                        location_str = f"{location_base}\n└─ {original_line}"
+                    else:
+                        location_str = location_base
+
+            # Clean and format error message
+            message = error.message
+            # Remove any mention of terraform/Terraform
+            message = re.sub(r'[Tt]erraform\s+', '', message)
+            # Add CLOUD prefix
+            message = f"[blue]CLOUD:[/blue] {message}"
+
+            error_table.add_row(
+                str(error.severity.value),
+                location_str or "",
+                message,
+                error.suggestion or ""
+            )
+            
+        console.print(error_table)
+        
+    # Display changes
+    if changes:
+        console.print("\n[green]Planned changes:[/green]")
+        changes_table = Table(show_header=True)
+        changes_table.add_column("Action")
+        changes_table.add_column("Resource")
+        changes_table.add_column("Block")
+        
+        for change in changes:
+            # Parse the change string
+            parts = change.split(":", 1)
+            if len(parts) == 2:
+                action = parts[0]
+                details = parts[1].strip()
+                
+                # Extract resource and block
+                match = re.match(r"(.+) in (.+) block", details)
+                if match:
+                    resource, block = match.groups()
+                    changes_table.add_row(action, resource, block)
+                    
+        console.print(changes_table)
+    else:
+        console.print("\n[yellow]No changes detected[/yellow]")
+
+def display_apply_results(changes: List[str], errors: List[CloudError], console: Console):
+        """Display the apply results in a formatted table"""
+        # Display errors first if any
+        if errors:
+            console.print("\n[red]Errors occurred during apply:[/red]")
+            error_table = Table(show_header=True)
+            error_table.add_column("Severity")
+            error_table.add_column("Location")
+            error_table.add_column("Message")
+            error_table.add_column("Suggestion")
+            
+            for error in errors:
+                error_table.add_row(
+                    str(error.severity.value),
+                    f"{error.source_location.block_type}:{error.source_location.line}",
+                    error.message,
+                    error.suggestion or ""
+                )
+                
+            console.print(error_table)
+            
+        # Display changes
+        if changes:
+            console.print("\n[green]Applied changes:[/green]")
+            changes_table = Table(show_header=True)
+            changes_table.add_column("Component")
+            changes_table.add_column("Action")
+            changes_table.add_column("Details")
+            
+            for change in changes:
+                if ":" in change:
+                    component, details = change.split(":", 1)
+                    if "ERROR" in component:
+                        changes_table.add_row("Error", "Failed", details.strip())
+                    else:
+                        changes_table.add_row(
+                            component.strip(),
+                            "Applied",
+                            details.strip()
+                        )
+                        
+            console.print(changes_table)
+        else:
+            console.print("\n[yellow]No changes were applied[/yellow]")
+
 @click.group()
 def cli():
     """Cloud Infrastructure Management CLI"""
     pass
+
+@cli.command()
+@click.argument('path', type=click.Path(exists=True))
+@click.option('--iac-path', default='./IaC', help='Path to generated IAC directory')
+def convert(path, iac_path):
+    """Convert .cloud configuration to standard infrastructure code"""
+    # Find .cloud file
+    cloud_file = find_cloud_file(path)
+    if not cloud_file:
+        click.echo(click.style("\nError: No .cloud file found in the specified path.", fg="red"))
+        return 1
+    
+    click.echo(click.style("\n=== Converting Cloud Configuration ===", fg="blue", bold=True))
+    
+    try:
+        # Run conversion
+        with click.progressbar(length=1, label='Converting configuration') as bar:
+            main_convert(convert_enhanced_hcl_to_standard(str(cloud_file)))
+            bar.update(1)
+        
+        # Preprocess file references
+        preprocess_file_references(iac_path, cloud_file)
+        
+        click.echo(click.style("\n✓ Successfully converted cloud configuration!", fg="green"))
+        return 0
+        
+    except Exception as e:
+        click.echo(click.style(f"\n✗ Conversion failed: {str(e)}", fg="red"))
+        return 1
 
 @cli.command()
 @click.argument('cloud-file', type=click.Path(exists=True))
@@ -1779,228 +1261,118 @@ def validate(cloud_file, iac_path):
     
     return 1 if errors else 0
 
-# @cli.command()
-# @click.argument('cloud-file', type=click.Path(exists=True))
-# @click.option('--iac-path', default='./IaC', help='Path to generated IAC directory')
-# @click.option('--fix', is_flag=True, help='Automatically apply suggested fixes')
-# def lint(cloud_file, iac_path, fix):
-#     """Lint .cloud file and suggest improvements"""
-#     click.echo(click.style("\n=== Cloud Configuration Linting ===", fg="blue", bold=True))
-    
-#     orchestrator = CloudOrchestrator(iac_path, cloud_file)
-#     suggestions = orchestrator.suggest_improvements()
-    
-#     if not suggestions:
-#         click.echo(click.style("\n✓ No improvements suggested - your code looks great!", fg="green"))
-#         return 0
-    
-#     # Group suggestions by type
-#     style_suggestions = []
-#     security_suggestions = []
-#     performance_suggestions = []
-#     best_practice_suggestions = []
-    
-#     for suggestion in suggestions:
-#         if "style" in suggestion.message.lower():
-#             style_suggestions.append(suggestion)
-#         elif any(keyword in suggestion.message.lower() for keyword in ["security", "encryption", "permission"]):
-#             security_suggestions.append(suggestion)
-#         elif any(keyword in suggestion.message.lower() for keyword in ["performance", "resource", "scaling"]):
-#             performance_suggestions.append(suggestion)
-#         else:
-#             best_practice_suggestions.append(suggestion)
-    
-#     # Print suggestions by category
-#     if security_suggestions:
-#         click.echo("\nSecurity Improvements:")
-#         for msg in security_suggestions:
-#             click.echo(format_message(msg))
-    
-#     if performance_suggestions:
-#         click.echo("\nPerformance Improvements:")
-#         for msg in performance_suggestions:
-#             click.echo(format_message(msg))
-    
-#     if style_suggestions:
-#         click.echo("\nStyle Improvements:")
-#         for msg in style_suggestions:
-#             click.echo(format_message(msg))
-    
-#     if best_practice_suggestions:
-#         click.echo("\nBest Practice Improvements:")
-#         for msg in best_practice_suggestions:
-#             click.echo(format_message(msg))
-    
-#     if fix:
-#         click.echo("\nApplying automatic fixes...")
-#         # TODO: Implement automatic fixing
-#         click.echo(click.style("Automatic fixing is not yet implemented", fg="yellow"))
-    
-#     return 0
 
 @cli.command()
-@click.argument('cloud-file', type=click.Path(exists=True))
+@click.argument('path', type=click.Path(exists=True))
 @click.option('--iac-path', default='./IaC', help='Path to generated IAC directory')
-def plan(cloud_file, iac_path):
+def plan(path, iac_path):
     """Show execution plan for .cloud configuration"""
-    click.echo(click.style("\n=== Cloud Infrastructure Plan ===", fg="blue", bold=True))
+    # Find .cloud file
+    cloud_file = find_cloud_file(path)
+    if not cloud_file:
+        click.echo(click.style("\nError: No .cloud file found in the specified path.", fg="red"))
+        return 1
+        
+    # Preprocess file references
+    preprocess_file_references(iac_path, cloud_file)
     
-    orchestrator = CloudOrchestrator(iac_path, cloud_file)
+    # Continue with existing plan logic
+    executor = CloudPlanExecutor(iac_path, str(cloud_file), CloudSourceMapper(str(cloud_file)))
+    changes, errors = executor.execute_plan()
     
-    # First validate
-    messages = orchestrator.validate_cloud_syntax()
-    if any(msg.type == MessageType.ERROR for msg in messages):
-        click.echo("\nValidation Errors:")
-        for msg in messages:
-            if msg.type == MessageType.ERROR:
-                click.echo(format_message(msg))
+    # Just show basic error messages
+    if errors:
+        # click.echo(click.style("\nErrors occurred during planning:", fg="red"))
         return 1
     
-    # Get plans
-    with click.progressbar(length=3, label='Generating plans') as bar:
-        tf_changes = orchestrator._get_terraform_plan()
-        bar.update(1)
-        
-        k8s_changes = orchestrator._get_kubernetes_plan()
-        # k8s_changes = "Random"
-        # bar.update(1)
-        
-        ansible_changes = orchestrator._get_ansible_plan()
-        bar.update(1)
-    
-    # Print plans
-    if tf_changes:
-        click.echo(format_plan_output(tf_changes, "Terraform Changes", "blue"))
-    
-    if k8s_changes:
-        click.echo(format_plan_output(k8s_changes, "Kubernetes Changes", "cyan"))
-    
-    if ansible_changes:
-        click.echo(format_plan_output(ansible_changes, "Ansible Changes", "green"))
-    
-    # Print summary
-    # print_plan_summary(tf_changes, ansible_changes)
-    print_plan_summary(tf_changes, k8s_changes, ansible_changes)
+    # Show changes if any
+    if changes:
+        click.echo("\nPlanned changes:")
+        for change in changes:
+            click.echo(f"  {change}")
+    else:
+        click.echo("\nNo changes detected")
     
     return 0
 
 @cli.command()
-@click.argument('cloud-file', type=click.Path(exists=True))
+@click.argument('path', type=click.Path(exists=True))
 @click.option('--iac-path', default='./IaC', help='Path to generated IAC directory')
 @click.option('--auto-approve', is_flag=True, help='Skip interactive approval')
-def apply(cloud_file, iac_path, auto_approve):
-    """Apply .cloud configuration"""
-    click.echo(click.style("\n=== Cloud Infrastructure Apply ===", fg="blue", bold=True))
-    
-    orchestrator = CloudOrchestrator(iac_path, cloud_file)
-    
-    # Validate first
-    messages = orchestrator.validate_cloud_syntax()
-    if any(msg.type == MessageType.ERROR for msg in messages):
-        click.echo("\nValidation Errors:")
-        for msg in messages:
-            if msg.type == MessageType.ERROR:
-                click.echo(format_message(msg))
+def apply(path, iac_path, auto_approve):
+    """Apply .cloud configuration to AWS infrastructure"""
+    # Find .cloud file
+    cloud_file = find_cloud_file(path)
+    if not cloud_file:
+        click.echo(click.style("\nError: No .cloud file found in the specified path.", fg="red"))
         return 1
     
-    # # Show plan
-    # tf_changes = orchestrator._get_terraform_plan()
-    # k8s_changes = orchestrator._get_kubernetes_plan()
-    # ansible_changes = orchestrator._get_ansible_plan()
+    # Preprocess file references
+    preprocess_file_references(iac_path, cloud_file)
     
-    # click.echo("\nPlanned Changes:")
-    # if tf_changes:
-    #     click.echo(format_plan_output(tf_changes, "Terraform Changes", "blue"))
-    # if k8s_changes:
-    #     click.echo(format_plan_output(k8s_changes, "Kubernetes Changes", "cyan"))
-    # if ansible_changes:
-    #     click.echo(format_plan_output(ansible_changes, "Ansible Changes", "green"))
+    executor = CloudApplyExecutor(iac_path, str(cloud_file), CloudSourceMapper(str(cloud_file)))
     
-    # print_plan_summary(tf_changes, k8s_changes, ansible_changes)
-    
-    # Get confirmation
+    # First run a plan to show what will change
     if not auto_approve:
-        click.confirm("\nDo you want to apply these changes?", abort=True)
+        plan_executor = CloudPlanExecutor(iac_path, str(cloud_file), CloudSourceMapper(str(cloud_file)))
+        plan_changes, plan_errors = plan_executor.execute_plan()
+        
+        if plan_errors:
+            click.echo(click.style("\nPlan contains errors. Please fix them before applying.", fg="red"))
+            return 1
+            
+        if not click.confirm("\nDo you want to apply these changes?"):
+            click.echo("\nApply cancelled.")
+            return 0
     
-    # Apply changes
-    success = True
-    with click.progressbar(length=3, label='Applying changes') as bar:
-        # Apply Terraform changes
-        # if tf_changes:
-        if not orchestrator.apply_terraform():
-            click.echo(click.style("\n✗ Terraform apply failed!", fg="red"))
-            success = False
-        bar.update(1)
-
-        # Apply Kubernetes changes
-        # if success and k8s_changes:
-        if not orchestrator.apply_kubernetes():
-            click.echo(click.style("\n✗ Kubernetes apply failed!", fg="red"))
-            success = False
-        bar.update(1)
-        
-        # Apply Ansible changes
-        # if success and ansible_changes:
-        if not orchestrator.apply_ansible():
-            click.echo(click.style("\n✗ Ansible apply failed!", fg="red"))
-            success = False
-        bar.update(1)
-        
-
-    if success:
-        click.echo(click.style("\n✓ Successfully applied all changes!", fg="green"))
-        return 0
-    else:
-        click.echo(click.style("\n✗ Some changes failed to apply. Review the errors above.", fg="red"))
+    # Execute the apply
+    changes, errors = executor.execute_apply()
+    
+    # Show basic results
+    if errors:
+        # click.echo(click.style("\nErrors occurred during apply:", fg="red"))
         return 1
+        
+    if changes:
+        click.echo("\nApplied changes:")
+        for change in changes:
+            click.echo(f"  {change}")
+    
+    return 0
 
 @cli.command()
-@click.argument('cloud-file', type=click.Path(exists=True))
+@click.argument('path', type=click.Path(exists=True))
 @click.option('--iac-path', default='./IaC', help='Path to generated IAC directory')
 @click.option('--auto-approve', is_flag=True, help='Skip interactive approval')
-def destroy(cloud_file, iac_path, auto_approve):
+def destroy(path, iac_path, auto_approve):
     """Destroy all infrastructure defined in .cloud file"""
+    # Find .cloud file
+    cloud_file = find_cloud_file(path)
+    if not cloud_file:
+        click.echo(click.style("\nError: No .cloud file found in the specified path.", fg="red"))
+        return 1
+
+    # Preprocess file references
+    preprocess_file_references(iac_path, cloud_file)
+    
     click.echo(click.style("\n=== Cloud Infrastructure Destruction ===", fg="red", bold=True))
     
     if not auto_approve and not confirm_destruction():
         click.echo("\nDestruction cancelled.")
         return 0
     
-    orchestrator = CloudOrchestrator(iac_path, cloud_file)
+    executor = CloudDestroyExecutor(iac_path, str(cloud_file), CloudSourceMapper(str(cloud_file)))
     
-    success = True
-    with click.progressbar(length=3, label='Destroying infrastructure') as bar:
-        # Destroy Kubernetes resources first
-        if 'kubernetes' in orchestrator.configs:
-            if not orchestrator.destroy_kubernetes():
-                click.echo(click.style("\n✗ Kubernetes destroy failed!", fg="red"))
-                success = False
-        bar.update(1)
-        
-        # Run Ansible cleanup if available
-        if success and 'ansible' in orchestrator.configs:
-            cleanup_path = orchestrator.configs['ansible'].path.replace('.yml', '-cleanup.yml')
-            if os.path.exists(cleanup_path):
-                try:
-                    subprocess.run(['ansible-playbook', cleanup_path], check=True)
-                except subprocess.CalledProcessError:
-                    click.echo(click.style("\n✗ Ansible cleanup failed!", fg="red"))
-                    success = False
-        bar.update(1)
-        
-        # Destroy Terraform resources last
-        if success and 'terraform' in orchestrator.configs:
-            if not orchestrator.destroy_terraform():
-                click.echo(click.style("\n✗ Terraform destroy failed!", fg="red"))
-                success = False
+    with click.progressbar(length=1, label='Destroying infrastructure') as bar:
+        changes, errors = executor.execute_destroy()
         bar.update(1)
     
-    if success:
+    if errors:
+        click.echo(click.style("\n✗ Infrastructure destruction failed.", fg="red"))
+        return 1
+    else:
         click.echo(click.style("\n✓ Successfully destroyed all infrastructure!", fg="green"))
         return 0
-    else:
-        click.echo(click.style("\n✗ Some resources failed to destroy. Review the errors above.", fg="red"))
-        return 1
     
 class CloudError(Exception):
     """Custom exception for Cloud CLI errors"""

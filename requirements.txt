@@ -2,3 +2,5 @@ lark==1.2.2
 python-hcl2==5.1.1
 PyYAML==6.0.2
 ansible==11.0.0
+rich==13.9.4
+boto3==1.35.72

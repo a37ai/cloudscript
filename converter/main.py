@@ -1,6 +1,6 @@
 from .utils import parse_universal_hcl
 from .terraform import TerraformGenerator
-from .ansible import AnsibleGenerator
+from .ansible import NewAnsibleGenerator
 from .kubernetes import KubernetesGenerator
 from .vars_generator import create_empty_vars
 import os
@@ -14,11 +14,10 @@ def main_convert(hcl_content: str):
     ensure_directory()
 
     # Parse and generate
-    services = parse_universal_hcl(hcl_content)
-
+    services, providers, mapping = parse_universal_hcl(hcl_content)
     # Generate configurations
-    tf_gen = TerraformGenerator()
-    ansible_gen = AnsibleGenerator()
+    tf_gen = TerraformGenerator(providers=providers)
+    ansible_gen = NewAnsibleGenerator()
     k8s_gen = KubernetesGenerator()
 
     # Generate Terraform JSON
@@ -41,5 +40,8 @@ def main_convert(hcl_content: str):
 
     with open('IaC/resources.yml', 'w') as f:
         f.write(k8s)
-
-    create_empty_vars('IaC/main.tf.json')
+    
+    if mapping:
+        mapping = str(mapping).replace("'", '"')
+        with open('IaC/mappings.json', 'w') as f:
+            f.write(str(mapping))

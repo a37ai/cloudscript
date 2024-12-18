@@ -1,0 +1,13 @@
+- name: Configure MySQL Database
+  hosts: '{{ target_servers | default(''all'') }}'
+  become: true
+  tasks:
+  - name: Install MySQL
+    package:
+      name: mysql-server
+      state: present
+      update_cache: true
+  - name: Configure MySQL root password
+    shell:
+      cmd: mysqladmin -u root password 'secretpass'
+    when: ansible_os_family == 'Debian'

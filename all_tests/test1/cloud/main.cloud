@@ -1,0 +1,272 @@
+providers {
+  aws {
+    provider = "aws"
+    region = "us-east-1"
+    version = "~> 4.0"
+  }
+}
+
+service "webapp" {
+  provider = "aws"
+  infrastructure {
+    # VPC Definition
+    network "vpc" {
+      cidr_block = "10.0.0.0/16"
+      enable_dns_hostnames = true
+      enable_dns_support = true
+      tags = {
+        Name = "main-vpc"
+      }
+      resource_type = "aws_vpc"
+    }
+
+    # Subnet Definitions
+    network "subnet1" {
+      vpc_id = "${infrastructure.network.vpc.id}"
+      cidr_block = "10.0.1.0/24"
+      availability_zone = "us-east-1a"
+      map_public_ip_on_launch = true
+      resource_type = "aws_subnet"
+    }
+
+    network "subnet2" {
+      vpc_id = "${infrastructure.network.vpc.id}"
+      cidr_block = "10.0.2.0/24"
+      availability_zone = "us-east-1b"
+      map_public_ip_on_launch = true
+      resource_type = "aws_subnet"
+    }
+
+    # Security Group for SSH Access
+    network "allow_ssh" {
+      name = "allow_ssh"
+      vpc_id = "${infrastructure.network.vpc.id}"
+      ingress = [
+        {
+          description = "Allow SSH access"
+          from_port = 22
+          to_port = 22
+          protocol = "tcp"
+          cidr_blocks = ["0.0.0.0/0"]
+          ipv6_cidr_blocks = []
+          prefix_list_ids = []
+          security_groups = []
+          self = false
+        }
+      ]
+      egress = [
+        {
+          description = "Allow all outbound traffic"
+          from_port = 0
+          to_port = 0
+          protocol = "-1"
+          cidr_blocks = ["0.0.0.0/0"]
+          ipv6_cidr_blocks = []
+          prefix_list_ids = []
+          security_groups = []
+          self = false
+        }
+      ]
+      resource_type = "aws_security_group"
+    }
+
+    # IAM Role for EKS Cluster
+    iam "eks_cluster_iam" {
+      name = "eks-cluster"
+      assume_role_policy = file("role.json")
+      resource_type = "aws_iam_role"
+    }
+
+    # IAM Policy Attachment for EKS Cluster
+    iam "eks_cluster_policy_attachment" {
+      role = "${infrastructure.iam.eks_cluster_iam.name}"
+      policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+      resource_type = "aws_iam_role_policy_attachment"
+    }
+
+    # EKS Cluster Definition
+    compute "eks_cluster_main" {
+      name = "main-cluster"
+      role_arn = "${infrastructure.iam.eks_cluster_iam.arn}"
+      vpc_config = {
+        subnet_ids = [
+          "${infrastructure.network.subnet1.id}",
+          "${infrastructure.network.subnet2.id}"
+        ]
+      }
+      depends_on = ["infrastructure.iam.eks_cluster_policy_attachment"]
+      resource_type = "aws_eks_cluster"
+    }
+
+    # EC2 Instance for Web Server
+    compute "web_server" {
+      instance_type = "t2.micro"
+      ami = "ami-005fc0f236362e99f"
+      subnet_id = "${infrastructure.network.subnet1.id}"
+      vpc_security_group_ids = ["${infrastructure.network.allow_ssh.id}"]
+      tags = {
+        Name = "main_web_server"
+      }
+      depends_on = ["infrastructure.network.vpc"]
+      resource_type = "aws_instance"
+    }
+  }
+
+  configuration {
+    play "webapp" {
+      name = "Configure webapp"
+      hosts = "{{ target_servers | default('all') }}"
+      become = true
+      vars = {
+        target_web_servers = "web_servers"
+        target_db_servers = "db_servers"
+      }
+
+      # Packages tasks block
+      task {
+        name = "Packages tasks"
+        block {
+          task {
+            name = "Install required packages"
+            package {
+              name = "{{ item }}"
+              state = "present"
+              update_cache = true
+            }
+            loop = ["nginx", "docker"]
+            check_mode = false  # Ensures packages are installed even in check mode
+          }
+        }
+      }
+
+      # Other tasks block
+      task {
+        name = "Other tasks"
+        block {
+          task {
+            name = "Create/modify /etc/nginx/nginx.conf"
+            copy {
+              dest = "/etc/nginx/nginx.conf"
+              content = file("nginx.conf")
+              mode = "0644"
+              owner = "root"
+              group = "root"
+            }
+            notify = ["restart nginx"]
+            when = "ansible_distribution == 'Ubuntu'"
+          }
+
+          task {
+            name = "Ensure nginx is started"
+            service {
+              name = "nginx"
+              state = "started"
+              enabled = "yes"
+            }
+            register = "nginx_started_result"
+            retries = 3
+            delay = 5
+            failed_when = "nginx_started_result is failed"
+            changed_when = "nginx_started_result is changed"
+            when = "ansible_distribution == 'Ubuntu'"
+          }
+
+          task {
+            name = "Verify nginx is serving content"
+            uri {
+              url = "http://localhost"
+              status_code = 200
+            }
+            register = "nginx_response"
+            retries = 3
+            delay = 5
+            until = "nginx_response.status == 200"
+          }
+        }
+      }
+
+      # Handlers
+      handler {
+        name = "restart nginx"
+        service {
+          name = "nginx"
+          state = "restarted"
+        }
+      }
+    }
+  }
+
+  containers {
+    app "web_app" {
+      image = "nginx:latest"
+      type = "Deployment"
+      replicas = 3
+      command = ["/bin/sh"]
+      args = ["-c", "nginx -g 'daemon off;'"]
+      working_dir = "/usr/share/nginx/html"
+
+      readiness_probe = {
+        http_get = {
+          path = "/healthz"
+          port = 80
+        }
+        initial_delay_seconds = 5
+        period_seconds = 10
+      }
+
+      resources = {
+        limits = {
+          cpu = "500m"
+          memory = "512Mi"
+        }
+        requests = {
+          cpu = "250m"
+          memory = "256Mi"
+        }
+      }
+
+      empty_dir_volumes = [
+        {
+          name = "cache"
+          size_limit = "1Gi"
+        }
+      ]
+
+      volume_mounts = [
+        {
+          name = "cache"
+          mountPath = "/cache"
+        }
+      ]
+
+      ports = [
+        {
+          container_port = 80
+          service_port = 80
+        }
+      ]
+
+      service = {
+        type = "LoadBalancer"
+        annotations = {
+          "service.beta.kubernetes.io/aws-load-balancer-type" = "nlb"
+        }
+      }
+
+      node_selector = {
+        "kubernetes.io/os" = "linux"
+        "node-type" = "web"
+      }
+
+      auto_scaling = {
+        min_replicas = 2
+        max_replicas = 10
+        target_cpu_utilization_percentage = 80
+      }
+    }
+  }
+
+  deployment {
+    "infrastructure.compute.web_server" maps_to "configuration.play.webapp"
+  }
+}

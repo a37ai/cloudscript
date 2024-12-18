@@ -1,0 +1,58 @@
+{
+  "terraform": {
+    "required_providers": {
+      "google": {
+        "source": "hashicorp/google",
+        "version": "~> 4.0"
+      }
+    }
+  },
+  "provider": {
+    "google": {
+      "project": "my-gcp-project",
+      "region": "us-central1"
+    }
+  },
+  "resource": {
+    "google_container_cluster": {
+      "gke_cluster": {
+        "name": "primary-cluster",
+        "initial_node_count": 1,
+        "location": "us-central1-c",
+        "provider": "google"
+      }
+    },
+    "google_container_node_pool": {
+      "gke_node_pool": {
+        "name": "default-pool",
+        "cluster": "${google_container_cluster.gke_cluster.name}",
+        "node_count": 2,
+        "provider": "google"
+      }
+    },
+    "google_compute_instance": {
+      "mysql_server": {
+        "name": "mysql-server-instance",
+        "machine_type": "n1-standard-1",
+        "tags": {
+          "Name": "db-server"
+        },
+        "provider": "google"
+      }
+    }
+  },
+  "output": {
+    "database_gke_cluster_id": {
+      "value": "${google_container_cluster.gke_cluster.id}",
+      "description": "ID of gke_cluster in service database"
+    },
+    "database_gke_node_pool_id": {
+      "value": "${google_container_node_pool.gke_node_pool.id}",
+      "description": "ID of gke_node_pool in service database"
+    },
+    "database_mysql_server_id": {
+      "value": "${google_compute_instance.mysql_server.id}",
+      "description": "ID of mysql_server in service database"
+    }
+  }
+}

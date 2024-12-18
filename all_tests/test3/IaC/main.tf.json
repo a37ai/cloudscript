@@ -1,0 +1,67 @@
+{
+  "terraform": {
+    "required_providers": {
+      "aws": {
+        "source": "hashicorp/aws",
+        "version": "~> 4.0"
+      }
+    }
+  },
+  "provider": {
+    "aws": {
+      "region": "us-west-2"
+    }
+  },
+  "resource": {
+    "aws_vpc": {
+      "vpc": {
+        "cidr_block": "10.10.0.0/16",
+        "enable_dns_hostnames": true,
+        "provider": "aws"
+      }
+    },
+    "aws_subnet": {
+      "public_subnet": {
+        "vpc_id": "${aws_vpc.vpc.id}",
+        "cidr_block": "10.10.1.0/24",
+        "provider": "aws"
+      }
+    },
+    "aws_lb": {
+      "alb": {
+        "name": "frontend-alb",
+        "load_balancer_type": "application",
+        "subnets": [
+          "${aws_subnet.public_subnet.id}"
+        ],
+        "provider": "aws"
+      }
+    },
+    "aws_instance": {
+      "web_server": {
+        "instance_type": "t3.micro",
+        "ami": "ami-0c55b159cbfafe1f0",
+        "subnet_id": "${aws_subnet.public_subnet.id}",
+        "provider": "aws"
+      }
+    }
+  },
+  "output": {
+    "frontend_vpc_id": {
+      "value": "${aws_vpc.vpc.id}",
+      "description": "ID of vpc in service frontend"
+    },
+    "frontend_public_subnet_id": {
+      "value": "${aws_subnet.public_subnet.id}",
+      "description": "ID of public_subnet in service frontend"
+    },
+    "frontend_alb_id": {
+      "value": "${aws_lb.alb.id}",
+      "description": "ID of alb in service frontend"
+    },
+    "frontend_web_server_id": {
+      "value": "${aws_instance.web_server.id}",
+      "description": "ID of web_server in service frontend"
+    }
+  }
+}

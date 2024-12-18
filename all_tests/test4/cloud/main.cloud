@@ -1,0 +1,111 @@
+providers {
+  azurerm {
+    provider = "azurerm"
+    features = {}
+    version  = "~> 3.0"
+  }
+}
+
+service "storage" {
+  provider = "azurerm"
+
+  infrastructure {
+    storage "account" {
+      name                     = "awesomecoolness"
+      resource_group_name      = "my-rg"
+      location                 = "eastus"
+      account_tier             = "Standard"
+      account_replication_type = "LRS"
+      resource_type           = "azurerm_storage_account"
+    }
+
+    compute "vm" {
+      name                = "app-server"
+      resource_group_name = "my-rg"
+      location           = "eastus"
+      size               = "Standard_B1s"
+      admin_username     = "azureuser"
+      resource_type      = "azurerm_linux_virtual_machine"
+      network_interface_ids = ["/subscriptions/<subscription-id>/resourceGroups/my-rg/providers/Microsoft.Network/networkInterfaces/nic-name"]
+      source_image_reference = {
+        publisher = "Canonical"
+        offer     = "0001-com-ubuntu-server-jammyabcdefg"
+        sku       = "ajshd"
+        version   = "latest"
+      }
+      os_disk = {
+        name                 = "myosdisk"
+        caching             = "ReadWrite"
+        storage_account_type = "Standard_LRS"
+      }
+      admin_ssh_key = [
+        {
+          username   = "azureuser"
+          public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC3r3dG7r3rs+YItiL6+wj8... user@host"
+        }
+      ]
+    }
+
+    network "ni" {
+      name                = "interface"
+      resource_group_name = "my_rg"
+      location           = "eastus"
+      ip_configuration = [
+        {
+          name                          = "ipconfig1"
+          subnet_id                     = "/subscriptions/<subscription-id>/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/default"
+          private_ip_address_allocation = "Dynamic"
+        }
+      ]
+    }
+  }
+
+  configuration {
+    play "app_deploy" {
+      name   = "Deploy custom app"
+      hosts  = "{{ target_servers | default('all') }}"
+      become = true
+
+      task {
+        name = "Install prerequisites"
+        package {
+          name  = ["git", "python3-pip"]
+          state = "present"
+        }
+      }
+
+      task {
+        name = "Clone application repo"
+        git {
+          repo = "https://github.com/Panchangam18/mixa.git"
+          dest = "/opt/myapp"
+        }
+      }
+
+      task {
+        name = "Install app dependencies"
+        shell {
+          cmd = "pip3 install -r /opt/myapp/requirements.txt"
+        }
+      }
+    }
+  }
+
+  containers {
+    configmap "app-config" {
+      data = {
+        "app.conf" = "setting=production\nthreads=4\n"
+      }
+    }
+
+    job "one-time-setup" {
+      image         = "busybox"
+      command       = ["/bin/sh", "-c", "echo 'Running one-time setup'; sleep 10;"]
+      backoff_limit = 1
+    }
+  }
+
+  deployment {
+    "infrastructure.compute.vm" maps_to "configuration.play.app_deploy"
+  }
+}

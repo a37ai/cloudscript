@@ -1,0 +1,47 @@
+{
+  "terraform": {
+    "required_providers": {
+      "azurerm": {
+        "source": "hashicorp/azurerm",
+        "version": "~> 3.0"
+      }
+    }
+  },
+  "provider": {
+    "azurerm": {
+      "features": {}
+    }
+  },
+  "resource": {
+    "azurerm_storage_account": {
+      "account": {
+        "name": "mystorageacc",
+        "resource_group_name": "my-rg",
+        "location": "eastus",
+        "account_tier": "Standard",
+        "account_replication_type": "LRS",
+        "provider": "azurerm"
+      }
+    },
+    "azurerm_linux_virtual_machine": {
+      "vm": {
+        "name": "app-server",
+        "resource_group_name": "my-rg",
+        "location": "eastus",
+        "vm_size": "Standard_B1s",
+        "admin_username": "azureuser",
+        "provider": "azurerm"
+      }
+    }
+  },
+  "output": {
+    "storage_account_id": {
+      "value": "${azurerm_storage_account.account.id}",
+      "description": "ID of account in service storage"
+    },
+    "storage_vm_id": {
+      "value": "${azurerm_linux_virtual_machine.vm.id}",
+      "description": "ID of vm in service storage"
+    }
+  }
+}

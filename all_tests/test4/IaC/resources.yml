@@ -1,0 +1,31 @@
+---
+apiVersion: v1
+data:
+  app.conf: setting=production\nthreads=4\n
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: default
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: one-time-setup
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: one-time-setup
+  template:
+    metadata:
+      labels:
+        app: one-time-setup
+    spec:
+      containers:
+      - command:
+        - /bin/sh
+        - -c
+        - echo 'Running one-time setup'; sleep 10;
+        image: busybox
+        name: one-time-setup

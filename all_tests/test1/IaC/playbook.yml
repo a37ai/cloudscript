@@ -1,0 +1,53 @@
+- name: Configure webapp
+  hosts: '{{ target_servers | default(''all'') }}'
+  become: true
+  vars:
+    target_web_servers: web_servers
+    target_db_servers: db_servers
+  handlers:
+  - name: restart nginx
+    service:
+      name: nginx
+      state: restarted
+    listen: restart nginx
+  tasks:
+  - name: Packages tasks
+    block:
+    - name: Install required packages
+      package:
+        name: '{{ item }}'
+        state: present
+        update_cache: true
+      loop:
+      - nginx
+      - docker
+  - name: Other tasks
+    block:
+    - name: Create/modify /etc/nginx/nginx.conf
+      copy:
+        dest: /etc/nginx/nginx.conf
+        content: ${file("nginx.conf")}
+        mode: '0644'
+        owner: root
+        group: root
+      when: ansible_distribution == 'Ubuntu'
+      notify:
+      - restart nginx
+    - name: Ensure nginx is started
+      service:
+        name: nginx
+        state: started
+        enabled: 'yes'
+      when: ansible_distribution == 'Ubuntu'
+      register: nginx_started_result
+      changed_when: nginx_started_result is changed
+      failed_when: nginx_started_result is failed
+      retries: 3
+      delay: 5
+    - name: Verify nginx
+      command: systemctl is-active nginx
+      register: verify_nginx
+      changed_when: false
+      failed_when: verify_nginx.rc != 0
+      retries: 1
+      delay: 5

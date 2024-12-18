@@ -1,0 +1,81 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-backup
+  namespace: default
+spec:
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: db-backup
+        spec:
+          containers:
+          - args:
+            - -u
+            - root
+            - -psecretpass
+            - mydb
+            command:
+            - /usr/bin/mysqldump
+            image: mysql:5.7
+            name: db-backup
+          restartPolicy: OnFailure
+  schedule: 0 2 * * *
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-tool
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: admin-tool
+  template:
+    metadata:
+      labels:
+        app: admin-tool
+    spec:
+      containers:
+      - image: nginx:alpine
+        name: admin-tool
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin-tool
+  namespace: default
+spec:
+  ports:
+  - port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: admin-tool
+  type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: admin-tool-hpa
+  namespace: default
+spec:
+  maxReplicas: 5
+  metrics:
+  - resource:
+      name: cpu
+      target:
+        averageUtilization: 70
+        type: Utilization
+    type: Resource
+  minReplicas: 1
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: admin-tool

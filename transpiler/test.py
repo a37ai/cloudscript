@@ -1,48 +1,35 @@
 import os
-from .main import convert_enhanced_hcl_to_standard_string
+from .main import convert_enhanced_hcl_to_standard
 
 def run_transpiler_tests():
-    """Run comprehensive tests for the transpiler with better error handling."""
+    """Run comprehensive tests for the transpiler with better error handling"""
     class TranspilerTest:
         def __init__(self):
             self.passed = 0
             self.failed = 0
-
-        def remove_comments(self, text: str) -> str:
-            """Removes comment lines from the HCL text."""
-            lines = text.splitlines()
-            non_comment_lines = [line for line in lines if not line.strip().startswith("#") and not line.strip().startswith("//")]
-            return "\n".join(non_comment_lines)
-
+        
         def assert_transpile(self, input_hcl: str, expected_output: str, test_name: str):
             try:
-                # Convert the input using the transpiler function
-                result = convert_enhanced_hcl_to_standard_string(input_hcl)
-                
-                # Remove comments from both result and expected output
-                result_no_comments = self.remove_comments(result)
-                expected_no_comments = self.remove_comments(expected_output)
-                
+                result = convert_enhanced_hcl_to_standard(input_hcl)
                 # Normalize whitespace for comparison
-                result_norm = ' '.join(result_no_comments.split())
-                expected_norm = ' '.join(expected_no_comments.split())
+                result_norm = ' '.join(result.split())
+                expected_norm = ' '.join(expected_output.split())
                 
-                # Check if normalized outputs match
                 if result_norm == expected_norm:
                     print(f"✓ {test_name}")
                     self.passed += 1
                 else:
                     print(f"✗ {test_name}")
-                    print("Expected (no comments):")
-                    print(expected_no_comments)
-                    print("Got (no comments):")
-                    print(result_no_comments)
+                    print("Expected:")
+                    print(expected_output)
+                    print("Got:")
+                    print(result)
                     self.failed += 1
             except Exception as e:
                 print(f"✗ {test_name}")
                 print(f"Error: {str(e)}")
                 self.failed += 1
-
+    
     test = TranspilerTest()
 
 
@@ -244,21 +231,21 @@ resource "aws_security_group" "multi_port" {
         "Nested Loops"
     )
 
-#     test.assert_transpile(
-#         """
-#         resource "aws_instance" "conditional_instance" {
-#             instance_type = var.is_production ? "t2.large" : "t2.micro"
-#             ami = var.is_production ? "ami-prod" : "ami-dev"
-#         }
-#         """,
-#         """
-# resource "aws_instance" "conditional_instance" {
-#   instance_type = var.is_production ? "t2.large" : "t2.micro"
-#   ami = var.is_production ? "ami-prod" : "ami-dev"
-# }
-#         """,
-#         "Ternary Expression in Resource"
-#     )
+    test.assert_transpile(
+        """
+        resource "aws_instance" "conditional_instance" {
+            instance_type = var.is_production ? "t2.large" : "t2.micro"
+            ami = var.is_production ? "ami-prod" : "ami-dev"
+        }
+        """,
+        """
+resource "aws_instance" "conditional_instance" {
+  instance_type = var.is_production ? "t2.large" : "t2.micro"
+  ami = var.is_production ? "ami-prod" : "ami-dev"
+}
+        """,
+        "Ternary Expression in Resource"
+    )
     
   
     test.assert_transpile(
@@ -311,5 +298,96 @@ resource "aws_service" "my_service" {
     )
     
     print(f"\nTests completed: {test.passed} passed, {test.failed} failed")
+
+enhanced_hcl = """
+type ComputeInstance {
+    cpu: number = 4
+    memory: number = 16
+    os: string = "Linux"
+}
+
+type Instance {
+    base: ComputeInstance
+    name: string = "default-instance"
+    size: "t2.micro" | "t2.small" = "t2.micro"
+}
+
+service "web_app" {
+    type = "application"
+    dependencies = []
+
+    infrastructure {
+        compute = [
+            {
+                type = Instance
+                name = "web_server"
+                count = 2
+                size = "t2.micro"
+                os = "ami-0abcdef1234567890" 
+                tags = {
+                    Environment = "production"
+                    Role        = "web"
+                }
+                provisioners = [
+                    {
+                        type = "remote-exec"
+                        inline = [
+                            "sudo apt-get update -y",
+                            "sudo apt-get install -y nginx",
+                            "sudo systemctl start nginx",
+                            "sudo systemctl enable nginx"
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+
+    configuration {
+        packages = ["nginx", "curl"]
+        services = {
+            running = ["nginx"]
+            enabled = ["nginx"]
+        }
+        variables = {
+            server_port = 80
+        }
+        files = {
+            "/etc/nginx/sites-available/default" = "templates/nginx_default.conf"
+        }
+    }
+
+    containers = [
+        {
+            name        = "web_container"
+            image       = "nginx:latest"
+            ports       = [80]
+            environment = {
+                NGINX_HOST = "localhost"
+                NGINX_PORT = "80"
+            }
+            replicas    = 3
+            health_check = {
+                http_get = {
+                    path = "/"
+                    port = 80
+                }
+                initial_delay_seconds = 15
+                period_seconds        = 20
+            }
+            resources = {
+                limits = {
+                    cpu    = "500m"
+                    memory = "256Mi"
+                }
+                requests = {
+                    cpu    = "250m"
+                    memory = "128Mi"
+                }
+            }
+        }
+    ]
+}
+"""
 
 run_transpiler_tests()

@@ -1,0 +1,393 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "http://example.com/your-language-schema.json",
+  "title": "Cloudscript Schema",
+  "type": "object",
+  "description": "Schema definition for Cloudscript.",
+  "properties": {
+    "type": {
+      "type": "array",
+      "description": "Optional type definitions to define custom resource schemas.",
+      "items": {
+        "type": "object",
+        "patternProperties": {
+          "^.*$": {
+            "type": "object",
+            "description": "Definition of a custom type.",
+            "properties": {
+              "resource_type": { "type": "string" }
+            },
+            "patternProperties": {
+              "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+                "description": "Field definitions for the custom type, including optional default values and constrained enums.",
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "enum": {
+                        "type": "array",
+                        "items": { "type": "string" }
+                      },
+                      "default": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "providers": {
+      "type": "object",
+      "description": "Provider configurations block.",
+      "patternProperties": {
+        "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+          "type": "object",
+          "description": "A provider configuration block.",
+          "properties": {
+            "provider": { "type": "string" },
+            "region": { "type": "string" },
+            "project": { "type": "string" },
+            "version": { "type": "string" },
+            "features": { "type": "object" }
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "service": {
+      "type": "object",
+      "description": "One or more services defined by the configuration.",
+      "patternProperties": {
+        "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+          "type": "object",
+          "description": "A service definition.",
+          "properties": {
+            "provider": { "type": "string" },
+            "infrastructure": {
+              "type": "object",
+              "description": "The infrastructure definition containing resource blocks like network, compute, iam, storage, etc.",
+              "patternProperties": {
+                "^(network|compute|iam|storage|other|[a-zA-Z_][a-zA-Z0-9_]*)$": {
+                  "type": "object",
+                  "description": "A category of resources (e.g. network, compute) or custom categories.",
+                  "patternProperties": {
+                    "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+                      "type": "object",
+                      "description": "A named resource instance.",
+                      "properties": {
+                        "resource_type": { "type": "string" },
+                        "depends_on": {
+                          "type": "array",
+                          "items": { "type": "string" }
+                        }
+                      },
+                      "additionalProperties": true
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "configuration": {
+              "type": "object",
+              "description": "Configuration for tasks, plays, and other host-configuration steps.",
+              "properties": {
+                "play": {
+                  "type": "object",
+                  "patternProperties": {
+                    "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+                      "type": "object",
+                      "description": "A play definition for configuration management.",
+                      "properties": {
+                        "name": { "type": "string" },
+                        "hosts": { "type": "string" },
+                        "become": { "type": "boolean" },
+                        "vars": {
+                          "type": "object",
+                          "additionalProperties": { "type": "string" }
+                        },
+                        "task": {
+                          "type": "array",
+                          "description": "A list of tasks or blocks of tasks.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": { "type": "string" },
+                              "when": { "type": "string" },
+                              "loop": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                              },
+                              "block": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "name": { "type": "string" },
+                                    "when": { "type": "string" },
+                                    "notify": {
+                                      "type": "array",
+                                      "items": { "type": "string" }
+                                    },
+                                    "failed_when": { "type": "string" },
+                                    "changed_when": { "type": "string" },
+                                    "retries": { "type": "number" },
+                                    "delay": { "type": "number" },
+                                    "register": { "type": "string" },
+                                    "package": {
+                                      "type": "object",
+                                      "properties": {
+                                        "name": {
+                                          "oneOf": [
+                                            { "type": "string" },
+                                            {
+                                              "type": "array",
+                                              "items": { "type": "string" }
+                                            }
+                                          ]
+                                        },
+                                        "state": { "type": "string" },
+                                        "update_cache": { "type": "boolean" }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "copy": {
+                                      "type": "object",
+                                      "properties": {
+                                        "dest": { "type": "string" },
+                                        "content": { "type": "string" },
+                                        "file": { "type": "string" },
+                                        "mode": { "type": "string" },
+                                        "owner": { "type": "string" },
+                                        "group": { "type": "string" }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "service": {
+                                      "type": "object",
+                                      "properties": {
+                                        "name": { "type": "string" },
+                                        "state": { "type": "string" },
+                                        "enabled": { "type": "string" }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "shell": {
+                                      "type": "object",
+                                      "properties": {
+                                        "cmd": { "type": "string" }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "command": {
+                                      "type": "string",
+                                      "description": "Command to run if specified."
+                                    },
+                                    "git": {
+                                      "type": "object",
+                                      "properties": {
+                                        "repo": { "type": "string" },
+                                        "dest": { "type": "string" }
+                                      },
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "handler": {
+                          "type": "array",
+                          "description": "Handlers invoked by tasks notifications.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": { "type": "string" },
+                              "service": {
+                                "type": "object",
+                                "properties": {
+                                  "name": { "type": "string" },
+                                  "state": { "type": "string" }
+                                },
+                                "additionalProperties": false
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "containers": {
+              "type": "object",
+              "description": "Containers and Kubernetes-like workload definitions (apps, jobs, configmaps, etc.).",
+              "patternProperties": {
+                "^(app|job|configmap)$": {
+                  "type": "object",
+                  "patternProperties": {
+                    "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+                      "type": "object",
+                      "description": "A named container workload.",
+                      "properties": {
+                        "image": { "type": "string" },
+                        "type": { "type": "string" },
+                        "replicas": { "type": "number" },
+                        "command": {
+                          "type": "array",
+                          "items": { "type": "string" }
+                        },
+                        "args": {
+                          "type": "array",
+                          "items": { "type": "string" }
+                        },
+                        "working_dir": { "type": "string" },
+                        "readiness_probe": {
+                          "type": "object",
+                          "properties": {
+                            "http_get": {
+                              "type": "object",
+                              "properties": {
+                                "path": { "type": "string" },
+                                "port": { "type": "number" }
+                              },
+                              "additionalProperties": false
+                            },
+                            "initial_delay_seconds": { "type": "number" },
+                            "period_seconds": { "type": "number" }
+                          },
+                          "additionalProperties": false
+                        },
+                        "resources": {
+                          "type": "object",
+                          "properties": {
+                            "limits": {
+                              "type": "object",
+                              "additionalProperties": { "type": "string" }
+                            },
+                            "requests": {
+                              "type": "object",
+                              "additionalProperties": { "type": "string" }
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "empty_dir_volumes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": { "type": "string" },
+                              "size_limit": { "type": "string" }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "volume_mounts": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": { "type": "string" },
+                              "mountPath": { "type": "string" }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "ports": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "container_port": { "type": "number" },
+                              "service_port": { "type": "number" }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "service": {
+                          "type": "object",
+                          "properties": {
+                            "type": { "type": "string" },
+                            "annotations": {
+                              "type": "object",
+                              "additionalProperties": { "type": "string" }
+                            },
+                            "ports": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "container_port": { "type": "number" },
+                                  "service_port": { "type": "number" }
+                                },
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "node_selector": {
+                          "type": "object",
+                          "additionalProperties": { "type": "string" }
+                        },
+                        "auto_scaling": {
+                          "type": "object",
+                          "properties": {
+                            "min_replicas": { "type": "number" },
+                            "max_replicas": { "type": "number" },
+                            "target_cpu_utilization_percentage": { "type": "number" }
+                          },
+                          "additionalProperties": false
+                        },
+                        "schedule": { "type": "string" },
+                        "restartPolicy": { "type": "string" },
+                        "backoff_limit": { "type": "number" },
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": { "type": "string" }
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            "deployment": {
+              "type": "object",
+              "description": "Defines mappings from infrastructure resources to configuration plays.",
+              "patternProperties": {
+                "^[^\\s]+$": {
+                  "type": "string",
+                  "description": "A mapping from a resource path to a configuration play."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": ["provider"],
+          "additionalProperties": false
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

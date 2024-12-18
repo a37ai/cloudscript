@@ -1,0 +1,110 @@
+providers {
+  google {
+    provider = "google"
+    project = "stately-sentry-445020-m1"
+    region = "us-central1"
+    zone = "us-central1-c"
+    version = "~> 4.0"
+  }
+}
+
+service "database" {
+  provider = "google"
+  infrastructure {
+    compute "gke_cluster" {
+      name = "primary-cluster"
+      resource_type = "google_container_cluster"
+      initial_node_count = 1
+      location = "us-central1-c"
+    }
+
+    compute "gke_node_pool" {
+      name = "default-pool"
+      cluster = "${infrastructure.compute.gke_cluster.name}"
+      node_count = 2
+      resource_type = "google_container_node_pool"
+    }
+
+    compute "mysql_server" {
+      name = "mysql-server-instance"
+      machine_type = "n1-standard-1"
+      resource_type = "google_compute_instance"
+      tags = ["db-server"]
+      boot_disk = [
+        {
+          "initialize_params": {
+            "image": "debian-cloud/debian-11"
+          }
+        }
+      ]
+      network_interface = [
+        {
+          "network": "default",
+          "access_config": {}
+        }
+      ]
+    }
+  }
+
+  configuration {
+    play "db_setup" {
+      name = "Configure MySQL Database"
+      hosts = "{{ target_servers | default('all') }}"
+      become = true
+
+      task {
+        name = "Install MySQL"
+        package {
+          name = "mysql-server"
+          state = "present"
+          update_cache = true
+        }
+      }
+
+      task {
+        name = "Configure MySQL root password"
+        shell {
+          cmd = "mysqladmin -u root password 'secretpass'"
+        }
+        when = "ansible_os_family == 'Debian'"
+      }
+    }
+  }
+
+  containers {
+    job "db-backup" {
+      image = "mysql:5.7"
+      type = "CronJob"
+      schedule = "0 2 * * *"
+      command = ["/usr/bin/mysqldump"]
+      args = ["-u", "root", "-psecretpass", "mydb"]
+      restartPolicy = "OnFailure"
+    }
+
+    app "admin-tool" {
+      image = "nginx:alpine"
+      type = "Deployment"
+      replicas = 1
+
+      auto_scaling {
+        min_replicas = 1
+        max_replicas = 5
+        target_cpu_utilization_percentage = 70
+      }
+
+      service {
+        type = "ClusterIP"
+        ports = [
+          {
+            container_port = 80
+            service_port = 80
+          }
+        ]
+      }
+    }
+  }
+
+  deployment {
+    "infrastructure.compute.mysql_server" maps_to "configuration.play.db_setup"
+  }
+}

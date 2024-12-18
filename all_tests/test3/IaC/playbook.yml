@@ -1,0 +1,13 @@
+- name: Setup Web Role
+  hosts: '{{ target_servers | default(''all'') }}'
+  become: true
+  tasks:
+  - name: Install Apache
+    package:
+      name: httpd
+      state: present
+  - name: Start Apache
+    service:
+      name: httpd
+      state: started
+      enabled: 'yes'
