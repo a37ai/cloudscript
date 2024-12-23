@@ -28,8 +28,8 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from transpiler.main import convert_enhanced_hcl_to_standard
-from converter.main import main_convert
+from transpiler.full import convert_enhanced_hcl_to_standard
+from converter.full import main_convert
 
 
 class MessageType(Enum):
@@ -1174,6 +1174,42 @@ def cli():
     pass
 
 @cli.command()
+def help():
+    """Display help information about cloud CLI commands"""
+    click.echo("\nCloud CLI - Infrastructure Management Tool\n")
+    
+    # General usage
+    click.echo("USAGE:")
+    click.echo("  cloud [OPTIONS] COMMAND [ARGS]\n")
+    
+    # Commands section
+    click.echo("COMMANDS:")
+    click.echo("  convert   Convert .cloud configuration to standard infrastructure code")
+    click.echo("  plan      Show execution plan for .cloud configuration")
+    click.echo("  apply     Apply .cloud configuration to AWS infrastructure")
+    click.echo("  destroy   Destroy all infrastructure defined in .cloud file")
+    click.echo("  help      Display this help message\n")
+    
+    # Common options section
+    click.echo("COMMON OPTIONS:")
+    click.echo("  --iac-path=PATH    Path to generated IAC directory (default: ./IaC)")
+    click.echo("  --auto-approve     Skip interactive approval (available for apply/destroy)")
+    click.echo("\n")
+    
+    # Example usage section
+    click.echo("EXAMPLES:")
+    click.echo("  cloud convert ./project")
+    click.echo("  cloud plan ./project --iac-path=./IaC")
+    click.echo("  cloud apply ./project --iac-path=./infrastructure --auto-approve")
+    click.echo("  cloud destroy ./project --auto-approve")
+    click.echo("\n")
+    
+    # Additional help info
+    click.echo("Run 'cloud COMMAND --help' for more information about a command")
+    
+    return 0
+
+@cli.command()
 @click.argument('path', type=click.Path(exists=True))
 @click.option('--iac-path', default='./IaC', help='Path to generated IAC directory')
 def convert(path, iac_path):
@@ -1182,6 +1218,28 @@ def convert(path, iac_path):
     cloud_file = find_cloud_file(path)
     if not cloud_file:
         click.echo(click.style("\nError: No .cloud file found in the specified path.", fg="red"))
+        return 1
+    
+    # Display warning message
+    click.echo(click.style("\n⚠️  WARNING ⚠️", fg="yellow", bold=True))
+    click.echo(click.style(
+        "\nConverting will:\n"
+        "1. Overwrite all existing content in the IaC directory\n"
+        "2. Make the 'cloud destroy' command unable to destroy resources that were previously deployed\n"
+        "\nAny deployed resources not captured in the new IaC files will need to be manually tracked and destroyed.",
+        fg="yellow"
+    ))
+    
+    # Prompt for confirmation
+    confirmation = click.prompt(
+        "\nTo proceed with conversion, please type CONVERT",
+        type=str,
+        default="",
+        show_default=False
+    )
+    
+    if confirmation != "CONVERT":
+        click.echo(click.style("\nConversion cancelled.", fg="yellow"))
         return 1
     
     click.echo(click.style("\n=== Converting Cloud Configuration ===", fg="blue", bold=True))
@@ -1202,64 +1260,64 @@ def convert(path, iac_path):
         click.echo(click.style(f"\n✗ Conversion failed: {str(e)}", fg="red"))
         return 1
 
-@cli.command()
-@click.argument('cloud-file', type=click.Path(exists=True))
-@click.option('--iac-path', default='./IaC', help='Path to generated IAC directory')
-def validate(cloud_file, iac_path):
-    """Validate .cloud file and generated infrastructure code"""
-    click.echo(click.style("\n=== Cloud Configuration Validation ===", fg="blue", bold=True))
+# @cli.command()
+# @click.argument('cloud-file', type=click.Path(exists=True))
+# @click.option('--iac-path', default='./IaC', help='Path to generated IAC directory')
+# def validate(cloud_file, iac_path):
+#     """Validate .cloud file and generated infrastructure code"""
+#     click.echo(click.style("\n=== Cloud Configuration Validation ===", fg="blue", bold=True))
     
-    orchestrator = CloudOrchestrator(iac_path, cloud_file)
+#     orchestrator = CloudOrchestrator(iac_path, cloud_file)
     
-    # Collect all validation messages
-    messages = []
+#     # Collect all validation messages
+#     messages = []
     
-    with click.progressbar(length=4, label='Running validations') as bar:
-        # Validate .cloud syntax
-        syntax_messages = orchestrator.validate_cloud_syntax()
-        messages.extend(syntax_messages)
-        bar.update(1)
+#     with click.progressbar(length=4, label='Running validations') as bar:
+#         # Validate .cloud syntax
+#         syntax_messages = orchestrator.validate_cloud_syntax()
+#         messages.extend(syntax_messages)
+#         bar.update(1)
         
-        # Validate Terraform output
-        tf_messages = orchestrator.validate_terraform_output()
-        messages.extend(tf_messages)
-        bar.update(1)
+#         # Validate Terraform output
+#         tf_messages = orchestrator.validate_terraform_output()
+#         messages.extend(tf_messages)
+#         bar.update(1)
         
-        # Validate Kubernetes output
-        k8s_messages = orchestrator.validate_kubernetes_output()
-        messages.extend(k8s_messages)
-        bar.update(1)
+#         # Validate Kubernetes output
+#         k8s_messages = orchestrator.validate_kubernetes_output()
+#         messages.extend(k8s_messages)
+#         bar.update(1)
         
-        # Validate Ansible output
-        ansible_messages = orchestrator.validate_ansible_output()
-        messages.extend(ansible_messages)
-        bar.update(1)
+#         # Validate Ansible output
+#         ansible_messages = orchestrator.validate_ansible_output()
+#         messages.extend(ansible_messages)
+#         bar.update(1)
     
-    # Group messages by type
-    errors = [msg for msg in messages if msg.type == MessageType.ERROR]
-    warnings = [msg for msg in messages if msg.type == MessageType.WARNING]
-    suggestions = [msg for msg in messages if msg.type == MessageType.SUGGESTION]
+#     # Group messages by type
+#     errors = [msg for msg in messages if msg.type == MessageType.ERROR]
+#     warnings = [msg for msg in messages if msg.type == MessageType.WARNING]
+#     suggestions = [msg for msg in messages if msg.type == MessageType.SUGGESTION]
     
-    # Print results grouped by type
-    if errors:
-        click.echo("\nCritical Issues:")
-        for msg in errors:
-            click.echo(format_message(msg))
+#     # Print results grouped by type
+#     if errors:
+#         click.echo("\nCritical Issues:")
+#         for msg in errors:
+#             click.echo(format_message(msg))
     
-    if warnings:
-        click.echo("\nWarnings:")
-        for msg in warnings:
-            click.echo(format_message(msg))
+#     if warnings:
+#         click.echo("\nWarnings:")
+#         for msg in warnings:
+#             click.echo(format_message(msg))
     
-    if suggestions:
-        click.echo("\nSuggested Improvements:")
-        for msg in suggestions:
-            click.echo(format_message(msg))
+#     if suggestions:
+#         click.echo("\nSuggested Improvements:")
+#         for msg in suggestions:
+#             click.echo(format_message(msg))
     
-    # Print summary
-    print_validation_summary(messages)
+#     # Print summary
+#     print_validation_summary(messages)
     
-    return 1 if errors else 0
+#     return 1 if errors else 0
 
 
 @cli.command()
@@ -1333,10 +1391,10 @@ def apply(path, iac_path, auto_approve):
         # click.echo(click.style("\nErrors occurred during apply:", fg="red"))
         return 1
         
-    if changes:
-        click.echo("\nApplied changes:")
-        for change in changes:
-            click.echo(f"  {change}")
+    # if changes:
+    #     click.echo("\nApplied changes:")
+    #     for change in changes:
+    #         click.echo(f"  {change}")
     
     return 0
 
@@ -1363,9 +1421,7 @@ def destroy(path, iac_path, auto_approve):
     
     executor = CloudDestroyExecutor(iac_path, str(cloud_file), CloudSourceMapper(str(cloud_file)))
     
-    with click.progressbar(length=1, label='Destroying infrastructure') as bar:
-        changes, errors = executor.execute_destroy()
-        bar.update(1)
+    changes, errors = executor.execute_destroy()
     
     if errors:
         click.echo(click.style("\n✗ Infrastructure destruction failed.", fg="red"))
@@ -1479,11 +1535,14 @@ def main(debug):
         sys.exit(1)
 
 # Add commands to the main group
-main.add_command(validate)
+# main.add_command(validate)
 # main.add_command(lint)
+main.add_command(convert)
 main.add_command(plan)
 main.add_command(apply)
 main.add_command(destroy)
+main.add_command(help)
+
 
 @main.command()
 def init():

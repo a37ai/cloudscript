@@ -3,6 +3,12 @@ import json
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Union, Optional, Tuple
+class LiteralString(str): pass
+
+def literal_presenter(dumper, data):
+    return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
+
+yaml.add_representer(LiteralString, literal_presenter)
 
 def find_cloud_file(path: Union[str, Path]) -> Optional[Path]:
     """
@@ -24,26 +30,26 @@ def load_referenced_file(file_path: Path, referenced_filename: str) -> Optional[
     Returns the file content as a properly escaped string.
     """
     try:
-        # Look for the referenced file in the same directory as the .cloud file
         referenced_file = file_path.parent / referenced_filename
         
         if not referenced_file.exists():
             print(f"Warning: Referenced file not found: {referenced_filename}")
             return None
             
-        # First try to load as JSON
+        # Special handling for .conf files to preserve raw content
+        if referenced_file.suffix == '.conf':
+            with open(referenced_file) as f:
+                return f.read()
+
+        # For non-.conf files, try JSON first
         try:
             with open(referenced_file) as f:
                 content = json.load(f)
-                # Convert to a JSON string with no extra escaping
                 return json.dumps(content)
         except json.JSONDecodeError:
-            # If not JSON, read as plain text
             with open(referenced_file) as f:
                 content = f.read()
-                # Escape special characters and ensure it's a valid string
                 escaped_content = json.dumps(content)
-                # Remove the outer quotes that json.dumps adds
                 return escaped_content[1:-1]
                 
     except Exception as e:
@@ -151,9 +157,9 @@ def process_dict_values_ansible(
             referenced_filename = match.group(1)
             file_content = load_referenced_file(cloud_file_path, referenced_filename)
             if file_content is not None:
-                # Escape double quotes inside the content to prevent YAML parsing issues
+                if referenced_filename.endswith('.conf'):
+                    return LiteralString(file_content)  # Return as literal string
                 safe_content = file_content.replace('"', '\\"')
-                # Wrap in double quotes so the YAML dumper uses a standard double-quoted string
                 return f"\"{safe_content}\""
         return data
     else:

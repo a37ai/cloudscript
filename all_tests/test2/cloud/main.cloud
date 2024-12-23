@@ -1,18 +1,18 @@
 providers {
   google {
     provider = "google"
-    project = "stately-sentry-445020-m1"
+    project = "cloudscript-445505"
     region = "us-central1"
     zone = "us-central1-c"
     version = "~> 4.0"
   }
 }
 
-service "database" {
+service "webapp" {
   provider = "google"
   infrastructure {
     compute "gke_cluster" {
-      name = "primary-cluster"
+      name = "primary-cluster-2"
       resource_type = "google_container_cluster"
       initial_node_count = 1
       location = "us-central1-c"
@@ -46,49 +46,113 @@ service "database" {
     }
   }
 
-  configuration {
-    play "db_setup" {
-      name = "Configure MySQL Database"
-      hosts = "{{ target_servers | default('all') }}"
-      become = true
+configuration {
+    play "webapp_debian" {
+      name = "Configure webapp on Debian"
+      hosts = "{{ target_servers | default('all') }}"
+      become = true
+      vars = {
+        target_web_servers = "web_servers"
+        target_db_servers = "db_servers"
+      }
 
-      task {
-        name = "Install MySQL"
-        package {
-          name = "mysql-server"
-          state = "present"
-          update_cache = true
-        }
-      }
+      # Packages tasks block
+      task {
+        name = "Packages tasks"
+        block {
+          task {
+            name = "Install required packages"
+            package {
+              name = "{{ item }}"
+              state = "present"
+              update_cache = true
+            }
+            loop = ["nginx", "docker"]
+            check_mode = false  # Ensures packages are installed even in check mode
+          }
+        }
+      }
 
-      task {
-        name = "Configure MySQL root password"
-        shell {
-          cmd = "mysqladmin -u root password 'secretpass'"
-        }
-        when = "ansible_os_family == 'Debian'"
-      }
-    }
-  }
+      # Other tasks block
+      task {
+        name = "Other tasks"
+        block {
+          task {
+            name = "Create/modify /etc/nginx/nginx.conf"
+            copy {
+              dest = "/etc/nginx/nginx.conf"
+              content = file("nginx.conf")
+              mode = "0644"
+              owner = "root"
+              group = "root"
+            }
+            notify = ["restart nginx"]
+            when = "ansible_distribution == 'Debian'"
+          }
+
+          task {
+            name = "Ensure nginx is started"
+            service {
+              name = "nginx"
+              state = "started"
+              enabled = true
+            }
+            register = "nginx_started_result"
+            retries = 3
+            delay = 5
+            when = "ansible_distribution == 'Debian'"
+          }
+
+          task {
+            name = "Verify nginx is serving content"
+            uri {
+              url = "http://localhost"
+              status_code = 200
+            }
+            register = "nginx_response"
+            retries = 3
+            delay = 5
+            until = "nginx_response.status == 200"
+          }
+        }
+      }
+
+      # Handlers
+      handler {
+        name = "restart nginx"
+        service {
+          name = "nginx"
+          state = "restarted"
+        }
+      }
+    }
+  }
 
   containers {
-    job "db-backup" {
-      image = "mysql:5.7"
-      type = "CronJob"
-      schedule = "0 2 * * *"
-      command = ["/usr/bin/mysqldump"]
-      args = ["-u", "root", "-psecretpass", "mydb"]
-      restartPolicy = "OnFailure"
+    job "system-backup" {
+      type            = "CronJob"
+      image           = "backup-tool:1.0"
+      schedule        = "0 3 * * *"  # Every day at 3:00 AM
+      command         = ["/usr/bin/backup.sh"]
+      args            = ["--full", "--destination", "/backups"]
+      user            = "backupuser"
+      restartPolicy   = "OnFailure"
+      
+      environment = {
+        BACKUP_DIR = "/backups"
+        LOG_FILE   = "/var/log/backup.log"
+        DB_PASSWORD = "secretpass"
+      }
     }
 
     app "admin-tool" {
       image = "nginx:alpine"
-      type = "Deployment"
+      type  = "Deployment"
       replicas = 1
 
       auto_scaling {
-        min_replicas = 1
-        max_replicas = 5
+        min_replicas                   = 1
+        max_replicas                   = 5
         target_cpu_utilization_percentage = 70
       }
 
@@ -97,7 +161,7 @@ service "database" {
         ports = [
           {
             container_port = 80
-            service_port = 80
+            service_port   = 80
           }
         ]
       }
@@ -105,6 +169,6 @@ service "database" {
   }
 
   deployment {
-    "infrastructure.compute.mysql_server" maps_to "configuration.play.db_setup"
+    "infrastructure.compute.mysql_server" maps_to "configuration.play.webapp_debian"
   }
 }

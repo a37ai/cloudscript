@@ -1,1 +1,1 @@
-{"infrastructure.compute.mysql_server": "configuration.play.db_setup"}
+{"infrastructure.compute.mysql_server": "configuration.play.webapp_debian"}

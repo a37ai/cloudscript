@@ -9,14 +9,15 @@
   },
   "provider": {
     "google": {
-      "project": "my-gcp-project",
-      "region": "us-central1"
+      "project": "cloudscript-445505",
+      "region": "us-central1",
+      "zone": "us-central1-c"
     }
   },
   "resource": {
     "google_container_cluster": {
       "gke_cluster": {
-        "name": "primary-cluster",
+        "name": "primary-cluster-2",
         "initial_node_count": 1,
         "location": "us-central1-c",
         "provider": "google"
@@ -34,25 +35,38 @@
       "mysql_server": {
         "name": "mysql-server-instance",
         "machine_type": "n1-standard-1",
-        "tags": {
-          "Name": "db-server"
-        },
+        "tags": [
+          "db-server"
+        ],
+        "boot_disk": [
+          {
+            "initialize_params": {
+              "image": "debian-cloud/debian-11"
+            }
+          }
+        ],
+        "network_interface": [
+          {
+            "network": "default",
+            "access_config": {}
+          }
+        ],
         "provider": "google"
       }
     }
   },
   "output": {
-    "database_gke_cluster_id": {
+    "webapp_gke_cluster_id": {
       "value": "${google_container_cluster.gke_cluster.id}",
-      "description": "ID of gke_cluster in service database"
+      "description": "ID of gke_cluster in service webapp"
     },
-    "database_gke_node_pool_id": {
+    "webapp_gke_node_pool_id": {
       "value": "${google_container_node_pool.gke_node_pool.id}",
-      "description": "ID of gke_node_pool in service database"
+      "description": "ID of gke_node_pool in service webapp"
     },
-    "database_mysql_server_id": {
+    "webapp_mysql_server_id": {
       "value": "${google_compute_instance.mysql_server.id}",
-      "description": "ID of mysql_server in service database"
+      "description": "ID of mysql_server in service webapp"
     }
   }
 }

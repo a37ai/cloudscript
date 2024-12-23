@@ -21,9 +21,18 @@
       }
     },
     "aws_subnet": {
-      "public_subnet": {
+      "public_subnet1": {
         "vpc_id": "${aws_vpc.vpc.id}",
         "cidr_block": "10.10.1.0/24",
+        "map_public_ip_on_launch": true,
+        "availability_zone": "us-west-2a",
+        "provider": "aws"
+      },
+      "public_subnet2": {
+        "vpc_id": "${aws_vpc.vpc.id}",
+        "map_public_ip_on_launch": true,
+        "cidr_block": "10.10.2.0/24",
+        "availability_zone": "us-west-2b",
         "provider": "aws"
       }
     },
@@ -32,7 +41,8 @@
         "name": "frontend-alb",
         "load_balancer_type": "application",
         "subnets": [
-          "${aws_subnet.public_subnet.id}"
+          "${aws_subnet.public_subnet1.id}",
+          "${aws_subnet.public_subnet2.id}"
         ],
         "provider": "aws"
       }
@@ -40,8 +50,8 @@
     "aws_instance": {
       "web_server": {
         "instance_type": "t3.micro",
-        "ami": "ami-0c55b159cbfafe1f0",
-        "subnet_id": "${aws_subnet.public_subnet.id}",
+        "ami": "ami-061dd8b45bc7deb3d",
+        "subnet_id": "${aws_subnet.public_subnet1.id}",
         "provider": "aws"
       }
     }
@@ -51,9 +61,13 @@
       "value": "${aws_vpc.vpc.id}",
       "description": "ID of vpc in service frontend"
     },
-    "frontend_public_subnet_id": {
-      "value": "${aws_subnet.public_subnet.id}",
-      "description": "ID of public_subnet in service frontend"
+    "frontend_public_subnet1_id": {
+      "value": "${aws_subnet.public_subnet1.id}",
+      "description": "ID of public_subnet1 in service frontend"
+    },
+    "frontend_public_subnet2_id": {
+      "value": "${aws_subnet.public_subnet2.id}",
+      "description": "ID of public_subnet2 in service frontend"
     },
     "frontend_alb_id": {
       "value": "${aws_lb.alb.id}",

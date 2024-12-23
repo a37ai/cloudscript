@@ -1,6 +1,6 @@
 .venv
-transpiler/full.py
-converter/full.py
+# transpiler/full.py
+# converter/full.py
 requirements1.txt
 cloud_cli.egg-info/
 new_hcl/
@@ -25,3 +25,12 @@ transpiler/integration.py
 transpiler/source_tracking.py
 transpiler/test_transpiler.py
 IaC/.keys/cloud-cli-key.pem
+CLI/executors/ansible_executor_old.py
+CLI/executors/new_apply.py
+CLI/executors/temp_ans_exc.py
+CLI/executors/temp_apply.py
+sample_cloud/
+test/
+all_tests/test3
+all_tests/test4
+all_tests/test5

@@ -2,7 +2,7 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: db-backup
+  name: system-backup
   namespace: default
 spec:
   jobTemplate:
@@ -10,20 +10,19 @@ spec:
       template:
         metadata:
           labels:
-            app: db-backup
+            app: system-backup
         spec:
           containers:
           - args:
-            - -u
-            - root
-            - -psecretpass
-            - mydb
+            - --full
+            - --destination
+            - /backups
             command:
-            - /usr/bin/mysqldump
-            image: mysql:5.7
-            name: db-backup
+            - /usr/bin/backup.sh
+            image: backup-tool:1.0
+            name: system-backup
           restartPolicy: OnFailure
-  schedule: 0 2 * * *
+  schedule: 0 3 * * *
 ---
 apiVersion: apps/v1
 kind: Deployment

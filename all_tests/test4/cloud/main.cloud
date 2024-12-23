@@ -1,111 +1,168 @@
 providers {
-  azurerm {
-    provider = "azurerm"
-    features = {}
-    version  = "~> 3.0"
-  }
+  azurerm {
+    provider = "azurerm"
+    features = {}
+    version  = "~> 3.0"
+  }
 }
 
 service "storage" {
-  provider = "azurerm"
+  provider = "azurerm"
 
-  infrastructure {
-    storage "account" {
-      name                     = "awesomecoolness"
-      resource_group_name      = "my-rg"
-      location                 = "eastus"
-      account_tier             = "Standard"
-      account_replication_type = "LRS"
-      resource_type           = "azurerm_storage_account"
-    }
+  infrastructure {
+    network "main" {
+      name = "my-vnet"
+      address_space = ["10.0.0.0/16"]
+      location = "eastus"
+      resource_group_name = "my_rg"
+      resource_type = "azurerm_virtual_network"
+      depends_on = ["infrastructure.group.my_rg"]
+    }
 
-    compute "vm" {
-      name                = "app-server"
-      resource_group_name = "my-rg"
-      location           = "eastus"
-      size               = "Standard_B1s"
-      admin_username     = "azureuser"
-      resource_type      = "azurerm_linux_virtual_machine"
-      network_interface_ids = ["/subscriptions/<subscription-id>/resourceGroups/my-rg/providers/Microsoft.Network/networkInterfaces/nic-name"]
-      source_image_reference = {
-        publisher = "Canonical"
-        offer     = "0001-com-ubuntu-server-jammyabcdefg"
-        sku       = "ajshd"
-        version   = "latest"
-      }
-      os_disk = {
-        name                 = "myosdisk"
-        caching             = "ReadWrite"
-        storage_account_type = "Standard_LRS"
-      }
-      admin_ssh_key = [
-        {
-          username   = "azureuser"
-          public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC3r3dG7r3rs+YItiL6+wj8... user@host"
-        }
-      ]
-    }
+    kubernetes "my_aks_cluster" {
+      name                = "my-aks-cluster"
+      location            = "eastus"
+      resource_group_name = "my_rg"
+      resource_type       = "azurerm_kubernetes_cluster"
+      depends_on          = ["infrastructure.group.my_rg"]
+      dns_prefix         = "myakscluster"
 
-    network "ni" {
-      name                = "interface"
-      resource_group_name = "my_rg"
-      location           = "eastus"
-      ip_configuration = [
-        {
-          name                          = "ipconfig1"
-          subnet_id                     = "/subscriptions/<subscription-id>/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/default"
-          private_ip_address_allocation = "Dynamic"
-        }
-      ]
-    }
-  }
+      default_node_pool {
+        name       = "default"
+        node_count = 1
+        vm_size    = "Standard_D2_v2"
+      }
 
-  configuration {
-    play "app_deploy" {
-      name   = "Deploy custom app"
-      hosts  = "{{ target_servers | default('all') }}"
-      become = true
+      identity {
+        type = "SystemAssigned"
+      }
 
-      task {
-        name = "Install prerequisites"
-        package {
-          name  = ["git", "python3-pip"]
-          state = "present"
-        }
-      }
+      network_profile {
+        network_plugin = "kubenet"
+        dns_service_ip = "10.0.0.10"
+        service_cidr   = "10.0.0.0/16"
+        pod_cidr      = "10.244.0.0/16"
+      }
+    }
 
-      task {
-        name = "Clone application repo"
-        git {
-          repo = "https://github.com/Panchangam18/mixa.git"
-          dest = "/opt/myapp"
-        }
-      }
+    network "internal" {
+      name = "internal"
+      resource_group_name = "my_rg"
+      virtual_network_name = "${infrastructure.network.main.name}"
+      address_prefixes = ["10.0.1.0/24"]
+      resource_type = "azurerm_subnet"
+      depends_on = ["infrastructure.network.main"]
+    }
+    storage "account" {
+      name                     = "awesomecoolness"
+      resource_group_name      = "my_rg"
+      location                 = "eastus"
+      account_tier             = "Standard"
+      account_replication_type = "LRS"
+      resource_type           = "azurerm_storage_account"
+      depends_on = ["infrastructure.group.my_rg"]
+    }
 
-      task {
-        name = "Install app dependencies"
-        shell {
-          cmd = "pip3 install -r /opt/myapp/requirements.txt"
-        }
-      }
-    }
-  }
+    compute "web_vm" {
+      name                = "web-app-server"
+      resource_group_name = "my_rg"
+      location           = "eastus"
+      size               = "Standard_B1s"
+      depends_on = ["infrastructure.group.my_rg"]
+      admin_username     = "azureuser"
+      resource_type      = "azurerm_linux_virtual_machine"
+      network_interface_ids = ["${infrastructure.network.ni.id}"]
+      source_image_reference = {
+        publisher = "Canonical"
+        offer = "0001-com-ubuntu-server-jammy"
+        sku = "22_04-lts-gen2"
+        version = "latest"
+      }
+      os_disk = {
+        name                 = "myosdisk"
+        caching             = "ReadWrite"
+        storage_account_type = "Standard_LRS"
+      }
+      admin_ssh_key = [
+        {
+          username   = "azureuser"
+          public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCzodOJhC4cLUHJ35XTiyCAGbUlH04Rq+LklVE5cm+rsmZ+Uxw3hirRVAkuPfOVldI4UEkPYaTy82HqMDeOVH9zXTo0lf3a3R9wIIWXxm4FmGrlVI5TCaEOpV5jXSB8xk/r1XN7Xh2WYrgsga3s38SwkZApVmUuadT2ILnu5Vh/w2mmGDCu0HaTp0W6c4wCbam4SzlSAFW/nlLFuTlfFH82IEeJh9N9l4eVy+sKwNmqn+cmwY3Xr8pmgi/O0MpM7zjyiUNeEvuGixvBT4yIb6AtWvqBS32J6ziyNraleo9cQyH4kDumTdZyOPDAMPnB3KCVmhG4s/+FooeMFVoZAfOJkOAXplMjrqwu0zYxh8TLzuMbdKivL9G/1S6LMuFrVzLX9KtmGQIQrSKUDW2Lc5YvZFVWN6kTRnCSnrJSmKR7mO6OhqP0CcMzAi0Mhm3XwB0RosAeBv0gLIL+LajGUJHJ4P3g6TEb6IpskFoI4LCkThKFTY6b9EnphM4nZaHwQcT+lGYrmG6pAXVHLtgl7jG3DQeuLwhK9RbwGs47RopjCsVU2iwHYNB8Tun0vu9gW4yC+dwA72RGbz+7C3np73xzEF4DkkFDJGb9FkhXDc0vbsT/LpcWem3qTSYuFsP/HFIs8BCRV8NOEabOT3o+3KkxrYcvGCX6y6IEl1is8d6kLw== your_email@example.com"
+        }
+      ]
+    }
 
-  containers {
-    configmap "app-config" {
-      data = {
-        "app.conf" = "setting=production\nthreads=4\n"
-      }
-    }
+    network "ni" {
+      name = "interface"
+      resource_group_name = "my_rg"
+      location = "eastus"
+      ip_configuration = [
+        {
+          name = "ipconfig1"
+          subnet_id = "${infrastructure.network.internal.id}"
+          private_ip_address_allocation = "Dynamic"
+        }
+      ]
+      resource_type = "azurerm_network_interface"
+      depends_on = ["infrastructure.network.internal"]
+    }
 
-    job "one-time-setup" {
-      image         = "busybox"
-      command       = ["/bin/sh", "-c", "echo 'Running one-time setup'; sleep 10;"]
-      backoff_limit = 1
-    }
-  }
+    group "my_rg" {
+      name = "my_rg"
+      location = "eastus"
+      resource_type = "azurerm_resource_group"
+    }
+  }
 
-  deployment {
-    "infrastructure.compute.vm" maps_to "configuration.play.app_deploy"
-  }
+  configuration {
+    play "web_app_deploy" {
+      name   = "Deploy custom web app"
+      hosts  = "{{ target_servers | default('all') }}"
+      become = true
+
+      vars = {
+        target_web_servers = "web_servers"
+      }
+
+      task {
+        name = "Install prerequisites"
+        package {
+          name  = ["git", "python3-pip"]
+          state = "present"
+        }
+      }
+
+      task {
+        name = "Clone application repo"
+        git {
+          repo = "https://github.com/Panchangam18/mixa.git"
+          dest = "/opt/myapp"
+        }
+      }
+
+      task {
+        name = "Install app dependencies"
+        shell {
+          cmd = "pip3 install -r /opt/myapp/requirements.txt"
+        }
+      }
+    }
+  }
+
+  containers {
+    configmap "app-config" {
+      data = {
+        "app.conf" = "setting=production\nthreads=4\n"
+      }
+    }
+
+    job "one-time-setup" {
+      image         = "busybox"
+      command       = ["/bin/sh", "-c", "echo 'Running one-time setup'; sleep 10;"]
+      backoff_limit = 1
+    }
+  }
+
+  deployment {
+    "infrastructure.compute.web_vm" maps_to "configuration.play.web_app_deploy"
+  }
 }

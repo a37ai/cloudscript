@@ -19,12 +19,14 @@ service "frontend" {
     network "public_subnet1" {
       vpc_id            = "${infrastructure.network.vpc.id}"
       cidr_block        = "10.10.1.0/24"
+      map_public_ip_on_launch = true
       availability_zone = "us-west-2a"
       resource_type     = "aws_subnet"
     }
 
     network "public_subnet2" {
       vpc_id            = "${infrastructure.network.vpc.id}"
+      map_public_ip_on_launch = true
       cidr_block        = "10.10.2.0/24"
       availability_zone = "us-west-2b"
       resource_type     = "aws_subnet"
