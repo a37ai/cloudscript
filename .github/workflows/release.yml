@@ -1,0 +1,228 @@
+name: Build and Release
+on:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: write
+jobs:
+  build-and-release:
+    name: Build and Release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # macOS builds
+          - os: macos-latest
+            TARGET: macos-amd64
+            CMD_BUILD: >
+              PYTHONOPTIMIZE=1 pyinstaller cloud-cli.spec &&
+              cd dist/ &&
+              tar czf ../cloud-cli-darwin-amd64.tar.gz cloud-cli
+            OUT_FILE_NAME: cloud-cli-darwin-amd64.tar.gz
+          - os: macos-14
+            TARGET: macos-arm64
+            CMD_BUILD: >
+              PYTHONOPTIMIZE=1 pyinstaller cloud-cli.spec &&
+              cd dist/ &&
+              tar czf ../cloud-cli-darwin-arm64.tar.gz cloud-cli
+            OUT_FILE_NAME: cloud-cli-darwin-arm64.tar.gz
+          
+          # Linux builds
+          - os: ubuntu-latest
+            TARGET: linux-amd64
+            CMD_BUILD: >
+              PYTHONOPTIMIZE=1 pyinstaller cloud-cli.spec &&
+              cd dist/ &&
+              tar czf ../cloud-cli-linux-amd64.tar.gz cloud-cli
+            OUT_FILE_NAME: cloud-cli-linux-amd64.tar.gz
+          - os: ubuntu-latest
+            TARGET: linux-arm64
+            CMD_BUILD: >
+              PYTHONOPTIMIZE=1 pyinstaller cloud-cli.spec &&
+              cd dist/ &&
+              tar czf ../cloud-cli-linux-arm64.tar.gz cloud-cli
+            OUT_FILE_NAME: cloud-cli-linux-arm64.tar.gz
+          
+          # Windows builds
+          - os: windows-latest
+            TARGET: windows-amd64
+            CMD_BUILD: >
+              set PYTHONOPTIMIZE=1 &&
+              pyinstaller cloud-cli.spec &&
+              cd dist &&
+              tar -a -c -f ../cloud-cli-windows-amd64.zip cloud-cli
+            OUT_FILE_NAME: cloud-cli-windows-amd64.zip
+          - os: windows-latest
+            TARGET: windows-arm64
+            CMD_BUILD: >
+              set PYTHONOPTIMIZE=1 &&
+              pyinstaller cloud-cli.spec &&
+              cd dist &&
+              tar -a -c -f ../cloud-cli-windows-arm64.zip cloud-cli
+            OUT_FILE_NAME: cloud-cli-windows-arm64.zip
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+      - name: Build binary
+        run: ${{ matrix.CMD_BUILD }}
+      - name: Generate SHA256
+        run: |
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            shasum -a 256 ${{ matrix.OUT_FILE_NAME }} > ${{ matrix.OUT_FILE_NAME }}.sha256
+          else
+            sha256sum ${{ matrix.OUT_FILE_NAME }} > ${{ matrix.OUT_FILE_NAME }}.sha256
+          fi
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.TARGET }}
+          path: |
+            ${{ matrix.OUT_FILE_NAME }}
+            ${{ matrix.OUT_FILE_NAME }}.sha256
+
+  create-release:
+    name: Create Release
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            */cloud-cli-*.tar.gz
+            */cloud-cli-*.zip
+            */cloud-cli-*.sha256
+          generate_release_notes: true
+
+  update-brew:
+    name: Update Brew Formula
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout brew tap repo
+        uses: actions/checkout@v4
+        with:
+          repository: o37-autoforge/homebrew-cloudscript
+          token: ${{ secrets.BREW_TAP_TOKEN }}
+      - name: Debug environment
+        run: |
+          echo "GitHub ref: $GITHUB_REF"
+          echo "GitHub repository: ${{ github.repository }}"
+          echo "Current directory contents:"
+          ls -la
+      - name: Download release artifacts and update formula
+        run: |
+          # Get version from tag
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Processing version: $VERSION"
+          
+          # Get the release information including assets
+          REPO_PATH="${{ github.repository }}"
+          echo "Repository path: $REPO_PATH"
+          
+          RELEASE_INFO=$(curl -s -H "Authorization: token ${{ secrets.BREW_TAP_TOKEN }}" \
+            "https://api.github.com/repos/${REPO_PATH}/releases/tags/v${VERSION}")
+          
+          echo "Got release info for v${VERSION}"
+          
+          # Extract assets URL
+          ASSETS_URL=$(echo "$RELEASE_INFO" | jq -r '.assets_url')
+          echo "Assets URL: $ASSETS_URL"
+          
+          # Function to get SHA from asset
+          get_sha() {
+            local pattern=$1
+            local sha=$(curl -sL -H "Authorization: token ${{ secrets.BREW_TAP_TOKEN }}" \
+              "$ASSETS_URL" | \
+              jq -r ".[] | select(.name | test(\"$pattern\")) | .browser_download_url" | \
+              xargs curl -sL | cut -d' ' -f1)
+            echo "$sha"
+          }
+          
+          # Get SHA256 values
+          ARM64_SHA256=$(get_sha "darwin-arm64.tar.gz.sha256$")
+          echo "ARM64 SHA256: $ARM64_SHA256"
+          
+          AMD64_SHA256=$(get_sha "darwin-amd64.tar.gz.sha256$")
+          echo "AMD64 SHA256: $AMD64_SHA256"
+          
+          LINUX_SHA256=$(get_sha "linux-amd64.tar.gz.sha256$")
+          echo "LINUX SHA256: $LINUX_SHA256"
+          
+          # Verify we got all SHAs
+          if [ -z "$ARM64_SHA256" ] || [ -z "$AMD64_SHA256" ] || [ -z "$LINUX_SHA256" ]; then
+            echo "Error: Failed to get one or more SHA256 values"
+            echo "Release info:"
+            echo "$RELEASE_INFO" | jq '.'
+            exit 1
+          fi
+          
+          echo "Formula file before changes:"
+          cat Formula/cloudscript.rb
+          
+          # Update formula file with more precise sed patterns
+          sed -i "s/version \".*\"/version \"$VERSION\"/" Formula/cloudscript.rb
+          sed -i "s|v[0-9.]*\/cloud-cli|v$VERSION\/cloud-cli|g" Formula/cloudscript.rb
+          
+          # More specific SHA256 replacements
+          sed -i "/if Hardware::CPU.arm?/,/else/s/sha256 \".*\"/sha256 \"$ARM64_SHA256\"/" Formula/cloudscript.rb
+          sed -i "/else/,/end/s/sha256 \".*\"/sha256 \"$AMD64_SHA256\"/" Formula/cloudscript.rb
+          sed -i "/on_linux/,/end/s/sha256 \".*\"/sha256 \"$LINUX_SHA256\"/" Formula/cloudscript.rb
+          
+          echo "Formula file after changes:"
+          cat Formula/cloudscript.rb
+      - name: Commit and push changes
+        run: |
+          git config --global user.name 'GitHub Action'
+          git config --global user.email 'action@github.com'
+          git add Formula/cloudscript.rb
+          git commit -m "Update formula to version ${GITHUB_REF#refs/tags/}"
+          git push
+
+  copy-to-repo:
+    name: Copy Binaries to Target Repository
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: ./binaries
+
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          repository: o37-autoforge/web-cloudscript
+          token: ${{ secrets.TARGET_REPO_TOKEN }}
+          path: target-repo
+
+      - name: Copy binaries
+        run: |
+          mkdir -p target-repo/binaries
+          cp -r binaries/*/*.tar.gz target-repo/binaries/ || true
+          cp -r binaries/*/*.zip target-repo/binaries/ || true
+          cp -r binaries/*/*.sha256 target-repo/binaries/ || true
+
+      - name: Commit and push changes
+        run: |
+          cd target-repo
+          git config --global user.name 'GitHub Action'
+          git config --global user.email 'action@github.com'
+          git add binaries/
+          git commit -m "Update binaries"
+          git push

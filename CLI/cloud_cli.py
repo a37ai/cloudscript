@@ -14,19 +14,19 @@ import sys
 import logging
 import traceback
 import time
-from .executors.plan import CloudPlanExecutor
-from .executors.apply import CloudApplyExecutor
-from .executors.destroy import CloudDestroyExecutor
-from .utils.file_preprocessing import preprocess_file_references, find_cloud_file
+from CLI.executors.plan import CloudPlanExecutor
+from CLI.executors.apply import CloudApplyExecutor
+from CLI.executors.destroy import CloudDestroyExecutor
+from CLI.utils.file_preprocessing import preprocess_file_references, find_cloud_file
 from typing import List, Dict, Optional, Tuple
-from .error_mapping.error_mappers import *
+from CLI.error_mapping.error_mappers import *
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 import sys
 from pathlib import Path
-sys.path.append(str(Path(__file__).parent.parent))
+# sys.path.append(str(Path(__file__).parent.parent))
 
 from transpiler.full import convert_enhanced_hcl_to_standard
 from converter.full import main_convert
@@ -1489,7 +1489,7 @@ def version_callback(ctx, param, value):
     """Print version information"""
     if not value or ctx.resilient_parsing:
         return
-    click.echo("Cloud CLI v1.0.0")
+    click.echo("Cloudscript CLI v1.0.0")
     ctx.exit()
 
 def init_config_dir():
