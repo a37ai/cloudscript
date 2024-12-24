@@ -48,19 +48,21 @@ jobs:
           - os: windows-latest
             TARGET: windows-amd64
             CMD_BUILD: >
+              python -c "import hcl2; import os; print('HCL2 location:', os.path.dirname(hcl2.__file__))" &&
+              python -c "import site; print('Site packages:', site.getsitepackages())" &&
               set PYTHONOPTIMIZE=1 &&
               pyinstaller cloud-cli.spec &&
-              cd dist &&
-              tar -a -c -f ../cloud-cli-windows-amd64.zip cloud-cli
-            OUT_FILE_NAME: cloud-cli-windows-amd64.zip
+              copy dist\cloud-cli.exe cloud-cli-windows-amd64.exe
+            OUT_FILE_NAME: cloud-cli-windows-amd64.exe
           - os: windows-latest
             TARGET: windows-arm64
             CMD_BUILD: >
+              python -c "import hcl2; import os; print('HCL2 location:', os.path.dirname(hcl2.__file__))" &&
+              python -c "import site; print('Site packages:', site.getsitepackages())" &&
               set PYTHONOPTIMIZE=1 &&
               pyinstaller cloud-cli.spec &&
-              cd dist &&
-              tar -a -c -f ../cloud-cli-windows-arm64.zip cloud-cli
-            OUT_FILE_NAME: cloud-cli-windows-arm64.zip
+              copy dist\cloud-cli.exe cloud-cli-windows-arm64.exe
+            OUT_FILE_NAME: cloud-cli-windows-arm64.exe
 
     steps:
       - uses: actions/checkout@v4
@@ -77,7 +79,9 @@ jobs:
         run: ${{ matrix.CMD_BUILD }}
       - name: Generate SHA256
         run: |
-          if [ "${{ runner.os }}" = "macOS" ]; then
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            certutil -hashfile ${{ matrix.OUT_FILE_NAME }} SHA256 | findstr /v "hash" > ${{ matrix.OUT_FILE_NAME }}.sha256
+          elif [ "${{ runner.os }}" = "macOS" ]; then
             shasum -a 256 ${{ matrix.OUT_FILE_NAME }} > ${{ matrix.OUT_FILE_NAME }}.sha256
           else
             sha256sum ${{ matrix.OUT_FILE_NAME }} > ${{ matrix.OUT_FILE_NAME }}.sha256
@@ -105,7 +109,7 @@ jobs:
         with:
           files: |
             */cloud-cli-*.tar.gz
-            */cloud-cli-*.zip
+            */cloud-cli-*.exe
             */cloud-cli-*.sha256
           generate_release_notes: true
 
@@ -215,7 +219,7 @@ jobs:
         run: |
           mkdir -p target-repo/binaries
           cp -r binaries/*/*.tar.gz target-repo/binaries/ || true
-          cp -r binaries/*/*.zip target-repo/binaries/ || true
+          cp -r binaries/*/*.exe target-repo/binaries/ || true
           cp -r binaries/*/*.sha256 target-repo/binaries/ || true
 
       - name: Commit and push changes

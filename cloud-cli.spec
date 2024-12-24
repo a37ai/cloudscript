@@ -5,10 +5,25 @@ from pathlib import Path
 
 block_cipher = None
 
-# Find hcl2 package location
-site_packages = site.getsitepackages()[0]
-hcl2_path = os.path.join(site_packages, 'hcl2')
-hcl2_grammar = os.path.join(hcl2_path, 'hcl2.lark')
+def find_hcl2_grammar():
+    # First try site-packages
+    for site_pkg in site.getsitepackages():
+        possible_path = os.path.join(site_pkg, 'hcl2', 'hcl2.lark')
+        if os.path.exists(possible_path):
+            return possible_path
+            
+    # Fall back to package location
+    import hcl2
+    package_path = os.path.dirname(hcl2.__file__)
+    possible_path = os.path.join(package_path, 'hcl2.lark')
+    if os.path.exists(possible_path):
+        return possible_path
+        
+    raise FileNotFoundError("Could not find hcl2.lark in any expected location")
+
+# Get the grammar file path
+hcl2_grammar = find_hcl2_grammar()
+print(f"Found hcl2 grammar at: {hcl2_grammar}")
 
 a = Analysis(
     ['CLI/cloud_cli.py'],
@@ -37,7 +52,7 @@ a = Analysis(
         'pandas',
         'IPython',
         'notebook'
-    ],  # Exclude unused large packages
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -56,8 +71,8 @@ exe = EXE(
     name='cloud-cli',
     debug=False,
     bootloader_ignore_signals=False,
-    strip=True,  # Strip symbols to reduce size
-    upx=False,   # Disable UPX compression
+    strip=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,
