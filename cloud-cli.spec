@@ -38,7 +38,13 @@ a = Analysis(
         'transpiler', 
         'converter',
         'hcl2',
-        'lark'
+        'lark',
+        'click',
+        'yaml',
+        'rich',
+        'rich.console',
+        'rich.table',
+        'rich.progress'
     ],
     hookspath=[],
     hooksconfig={},
