@@ -78,14 +78,20 @@ jobs:
       - name: Build binary
         run: ${{ matrix.CMD_BUILD }}
       - name: Generate SHA256
+        shell: bash
+        if: runner.os != 'Windows'
         run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            certutil -hashfile ${{ matrix.OUT_FILE_NAME }} SHA256 | findstr /v "hash" > ${{ matrix.OUT_FILE_NAME }}.sha256
-          elif [ "${{ runner.os }}" = "macOS" ]; then
+          if [ "${{ runner.os }}" = "macOS" ]; then
             shasum -a 256 ${{ matrix.OUT_FILE_NAME }} > ${{ matrix.OUT_FILE_NAME }}.sha256
           else
             sha256sum ${{ matrix.OUT_FILE_NAME }} > ${{ matrix.OUT_FILE_NAME }}.sha256
           fi
+      - name: Generate SHA256 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 ${{ matrix.OUT_FILE_NAME }}).Hash.ToLower()
+          $hash + " *${{ matrix.OUT_FILE_NAME }}" | Out-File -Encoding utf8 ${{ matrix.OUT_FILE_NAME }}.sha256
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
