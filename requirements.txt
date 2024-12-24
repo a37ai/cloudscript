@@ -7,3 +7,4 @@ boto3==1.35.72
 google-auth==2.37.0
 google-cloud-compute==1.23.0
 google==3.0.0
+click==8.1.7
