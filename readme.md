@@ -53,12 +53,6 @@ Cloudscript is an Infrastructure as Code (IaC) language designed to simplify the
   - Converts your .cloud file into the appropriate Terraform, Ansible and Kubernetes files within an IaC directory.
   - Ensures valid syntax for the .cloud file.
 
-- **`cloud validate [file path]`**
-  - Validates the provided `cloud` file and offers suggestions for best practices.
-  - Example suggestions:
-    - Recommend larger instance sizes (e.g., suggest avoiding `t2.micro` in production).
-    - Highlight missing or inefficient configurations.
-
 - **`cloud plan [file path]`**
   - Executes a comprehensive dry-run for all Terraform, Kubernetes, and Ansible code.
   - Key features:
