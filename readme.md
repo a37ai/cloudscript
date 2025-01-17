@@ -9,17 +9,14 @@
 <!-- PROJECT LOGO -->
 <br />
 <div align="center">
-  <a href="https://github.com/othneildrew/Best-README-Template">
-    <img src="images/logo.png" alt="Logo" width="80" height="80">
-  </a>
-
-  <h1 align="center">Cloudscript <p>an a37.ai product</p></h1>
+  <a href="https://cloudscript.ai"><img src="resources/logo.png" alt="Logo" width="300"></a><p align="center" style="margin-top: 0; font-size: 1.5em;"><i>an <a href="https://a37.ai">a37.ai</a> product</i></p>
+  <hr style="width: 100%; margin: 1em auto;">
 
   <p align="center">
-    The future of IaC
-    <br />
+    <!-- The future of IaC -->
+    <!-- <br /> -->
     <a href="https://docs.cloudscript.ai"><strong>Explore the docs »</strong></a>
-    <br />
+    <!-- <br /> -->
 <!--     <br /> -->
 <!--     <a href="https://github.com/othneildrew/Best-README-Template">View Demo</a>
     &middot;
