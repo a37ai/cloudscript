@@ -207,7 +207,7 @@ Distributed under the MIT License. See `LICENSE.txt` for more information.
 <!-- CONTACT -->
 # Contact
 
-Your Name - [@your_twitter](https://twitter.com/your_username) - email@example.com
+[a37.ai](https://a37.ai) - [team@tryforge.ai](mailto:team@tryforge.ai)
 
 Project Link: [https://github.com/o37-autoforge/cloud/](https://github.com/o37-autoforge/cloud/)
 
