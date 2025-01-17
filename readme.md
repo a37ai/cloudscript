@@ -1,6 +1,6 @@
-# Cloudscript
+# [Cloudscript](https://www.cloudscript.ai/)
 
-Cloudscript is an Infrastructure as Code (IaC) language designed to simplify the deployment and management of cloud resources, applications, and configurations. With Cloud, you can combine the functionality of Terraform, Ansible, and Kubernetes into a single, cohesive .cloud file for seamless orchestration.
+Cloudscript is an Infrastructure as Code (IaC) language designed to simplify the deployment and management of cloud resources, applications, and configurations. With Cloudscript, you can combine the functionality of Terraform, Ansible, and Kubernetes into a single, cohesive .cloud file for seamless orchestration.
 
 ## Key Features
 
