@@ -1,3 +1,5 @@
+<a id="readme-top"></a>
+
 <!-- PROJECT SHIELDS -->
 [![Contributors][contributors-shield]][contributors-url]
 [![Forks][forks-shield]][forks-url]
@@ -16,13 +18,13 @@
     <!-- The future of IaC -->
     <!-- <br /> -->
     <a href="https://docs.cloudscript.ai"><strong>Explore the docs »</strong></a>
-    <!-- <br /> -->
+    <br />
 <!--     <br /> -->
 <!--     <a href="https://github.com/othneildrew/Best-README-Template">View Demo</a>
+    &middot; -->
+    <a href="https://github.com/o37-autoforge/cloud/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
     &middot;
-    <a href="https://github.com/othneildrew/Best-README-Template/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
-    &middot;
-    <a href="https://github.com/othneildrew/Best-README-Template/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a> -->
+    <a href="https://github.com/o37-autoforge/cloud/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a>
   </p>
 </div>
 
@@ -40,10 +42,10 @@
     </li>
     <li>
       <a href="#language-components-overview">Language Components Overview</a>
-      <ul>
+      <!-- <ul>
         <li><a href="#service">Service</a></li>
         <li><a href="#installation">Installation</a></li>
-      </ul>
+      </ul> -->
     </li>
     <li><a href="#cloudscript-cli">Cloudscript CLI</a></li>
     <li><a href="#contributing">Contributing</a></li>
