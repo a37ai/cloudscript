@@ -816,8 +816,16 @@ def convert_enhanced_hcl_to_standard_string(enhanced_hcl: str) -> str:
     lexer = EnhancedHCLLexer(enhanced_hcl)
     tokens = lexer.tokenize()
 
+    # Initialize the parser with the tokens
     parser = EnhancedHCLParser(tokens)
     ast = parser.parse()
 
+    transformer = ASTTransformer(parser.type_registry)
+    transformed_ast = transformer.transform(ast)
+
+    # Initialize the transpiler with the parser's type registry
     transpiler = HCLTranspiler(parser.type_registry)
-    return transpiler.transpile(ast)
+
+    standard_hcl = transpiler.transpile(transformed_ast)
+
+    return standard_hcl

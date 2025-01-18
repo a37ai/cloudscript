@@ -1,6 +1,6 @@
 .venv
-# transpiler/full.py
-# converter/full.py
+transpiler/full.py
+converter/full.py
 requirements1.txt
 cloud_cli.egg-info/
 new_hcl/

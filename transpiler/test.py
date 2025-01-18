@@ -1,5 +1,5 @@
 import os
-from .main import convert_enhanced_hcl_to_standard
+from transpiler.main import convert_enhanced_hcl_to_standard_string
 
 def run_transpiler_tests():
     """Run comprehensive tests for the transpiler with better error handling"""
@@ -10,7 +10,7 @@ def run_transpiler_tests():
         
         def assert_transpile(self, input_hcl: str, expected_output: str, test_name: str):
             try:
-                result = convert_enhanced_hcl_to_standard(input_hcl)
+                result = convert_enhanced_hcl_to_standard_string(input_hcl)
                 # Normalize whitespace for comparison
                 result_norm = ' '.join(result.split())
                 expected_norm = ' '.join(expected_output.split())
