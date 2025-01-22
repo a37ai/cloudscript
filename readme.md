@@ -1,22 +1,22 @@
 <a id="readme-top"></a>
 
 <div align="center">
-  <a href="https://github.com/a37ai/cloud/graphs/contributors">
+  <a href="https://github.com/a37ai/cloudscript/graphs/contributors">
     <img src="https://img.shields.io/github/contributors/a37ai/cloud.svg?style=for-the-badge" alt="Contributors" />
   </a>
-  <a href="https://github.com/a37ai/cloud/network/members">
-    <img src="https://img.shields.io/github/forks/a37ai/cloud.svg?style=for-the-badge" alt="Forks" />
+  <a href="https://github.com/a37ai/cloudscript/network/members">
+    <img src="https://img.shields.io/github/forks/a37ai/cloudscript.svg?style=for-the-badge" alt="Forks" />
   </a>
-  <a href="https://github.com/a37ai/cloud/stargazers">
-    <img src="https://img.shields.io/github/stars/a37ai/cloud.svg?style=for-the-badge" alt="Stargazers" />
+  <a href="https://github.com/a37ai/cloudscript/stargazers">
+    <img src="https://img.shields.io/github/stars/a37ai/cloudscript.svg?style=for-the-badge" alt="Stargazers" />
   </a>
-  <a href="https://github.com/a37ai/cloud/issues">
-    <img src="https://img.shields.io/github/issues/a37ai/cloud.svg?style=for-the-badge" alt="Issues" />
+  <a href="https://github.com/a37ai/cloudscript/issues">
+    <img src="https://img.shields.io/github/issues/a37ai/cloudscript.svg?style=for-the-badge" alt="Issues" />
   </a>
-  <a href="https://github.com/a37ai/cloud/blob/master/LICENSE.txt">
-    <img src="https://img.shields.io/github/license/a37ai/cloud.svg?style=for-the-badge" alt="MIT License" />
+  <a href="https://github.com/a37ai/cloudscript/blob/master/LICENSE.txt">
+    <img src="https://img.shields.io/github/license/a37ai/cloudscript.svg?style=for-the-badge" alt="MIT License" />
   </a>
-  <a href="https://linkedin.com/company/o37">
+  <a href="https://linkedin.com/company/a37">
     <img src="https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555" alt="LinkedIn" />
   </a>
   <a href="https://cloudscript.ai">
