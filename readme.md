@@ -2,7 +2,7 @@
 
 <div align="center">
   <a href="https://github.com/a37ai/cloudscript/graphs/contributors">
-    <img src="https://img.shields.io/github/contributors/a37ai/cloud.svg?style=for-the-badge" alt="Contributors" />
+    <img src="https://img.shields.io/github/contributors/a37ai/cloudscript.svg?style=for-the-badge" alt="Contributors" />
   </a>
   <a href="https://github.com/a37ai/cloudscript/network/members">
     <img src="https://img.shields.io/github/forks/a37ai/cloudscript.svg?style=for-the-badge" alt="Forks" />
@@ -42,9 +42,9 @@
 <!--     <br /> -->
 <!--     <a href="https://github.com/othneildrew/Best-README-Template">View Demo</a>
     &middot; -->
-    <a href="https://github.com/o37-autoforge/cloud/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
+    <a href="https://github.com/a37ai/cloudscript/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
     &middot;
-    <a href="https://github.com/o37-autoforge/cloud/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a>
+    <a href="https://github.com/a37ai/cloudscript/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a>
   </p>
 </div>
 
@@ -211,8 +211,8 @@ Don't forget to give the project a star! Thanks again!
    
 ### Top contributors:
 
-<a href="https://github.com/o37-autoforge/cloud/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=o37-autoforge/cloud" alt="contrib.rocks image" />
+<a href="https://github.com/a37ai/cloudscript/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=a37ai/cloudscript" alt="contrib.rocks image" />
 </a>
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -229,7 +229,7 @@ Distributed under the MIT License. See `LICENSE.txt` for more information.
 
 [a37.ai](https://a37.ai) - [team@tryforge.ai](mailto:team@tryforge.ai)
 
-Project Link: [https://github.com/o37-autoforge/cloud/](https://github.com/o37-autoforge/cloud/)
+Project Link: [https://github.com/a37ai/cloudscript/](https://github.com/a37ai/cloudscript/)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -237,16 +237,16 @@ Project Link: [https://github.com/o37-autoforge/cloud/](https://github.com/o37-a
 
 <!-- MARKDOWN LINKS & IMAGES -->
 <!-- https://www.markdownguide.org/basic-syntax/#reference-style-links -->
-[contributors-shield]: https://img.shields.io/github/contributors/o37-autoforge/cloud.svg?style=for-the-badge
-[contributors-url]: https://github.com/o37-autoforge/cloud/graphs/contributors
-[forks-shield]: https://img.shields.io/github/forks/o37-autoforge/cloud.svg?style=for-the-badge
-[forks-url]: https://github.com/o37-autoforge/cloud/network/members
-[stars-shield]: https://img.shields.io/github/stars/o37-autoforge/cloud.svg?style=for-the-badge
-[stars-url]: https://github.com/o37-autoforge/cloud/stargazers
-[issues-shield]: https://img.shields.io/github/issues/o37-autoforge/cloud.svg?style=for-the-badge
-[issues-url]: https://github.com/o37-autoforge/cloud/issues
-[license-shield]: https://img.shields.io/github/license/o37-autoforge/cloud.svg?style=for-the-badge
-[license-url]: https://github.com/o37-autoforge/cloud/blob/master/LICENSE.txt
+[contributors-shield]: https://img.shields.io/github/contributors/a37ai/cloudscript.svg?style=for-the-badge
+[contributors-url]: https://github.com/a37ai/cloudscript/graphs/contributors
+[forks-shield]: https://img.shields.io/github/forks/a37ai/cloudscript.svg?style=for-the-badge
+[forks-url]: https://github.com/a37ai/cloudscript/network/members
+[stars-shield]: https://img.shields.io/github/stars/a37ai/cloudscript.svg?style=for-the-badge
+[stars-url]: https://github.com/a37ai/cloudscript/stargazers
+[issues-shield]: https://img.shields.io/github/issues/a37ai/cloudscript.svg?style=for-the-badge
+[issues-url]: https://github.com/a37ai/cloudscript/issues
+[license-shield]: https://img.shields.io/github/license/a37ai/cloudscript.svg?style=for-the-badge
+[license-url]: https://github.com/a37ai/cloudscript/blob/master/LICENSE.txt
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
 [linkedin-url]: https://linkedin.com/in/othneildrew
 [product-screenshot]: images/screenshot.png
