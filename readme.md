@@ -1,20 +1,20 @@
 <a id="readme-top"></a>
 
 <div align="center">
-  <a href="https://github.com/o37-autoforge/cloud/graphs/contributors">
-    <img src="https://img.shields.io/github/contributors/o37-autoforge/cloud.svg?style=for-the-badge" alt="Contributors" />
+  <a href="https://github.com/a37ai/cloud/graphs/contributors">
+    <img src="https://img.shields.io/github/contributors/a37ai/cloud.svg?style=for-the-badge" alt="Contributors" />
   </a>
-  <a href="https://github.com/o37-autoforge/cloud/network/members">
-    <img src="https://img.shields.io/github/forks/o37-autoforge/cloud.svg?style=for-the-badge" alt="Forks" />
+  <a href="https://github.com/a37ai/cloud/network/members">
+    <img src="https://img.shields.io/github/forks/a37ai/cloud.svg?style=for-the-badge" alt="Forks" />
   </a>
-  <a href="https://github.com/o37-autoforge/cloud/stargazers">
-    <img src="https://img.shields.io/github/stars/o37-autoforge/cloud.svg?style=for-the-badge" alt="Stargazers" />
+  <a href="https://github.com/a37ai/cloud/stargazers">
+    <img src="https://img.shields.io/github/stars/a37ai/cloud.svg?style=for-the-badge" alt="Stargazers" />
   </a>
-  <a href="https://github.com/o37-autoforge/cloud/issues">
-    <img src="https://img.shields.io/github/issues/o37-autoforge/cloud.svg?style=for-the-badge" alt="Issues" />
+  <a href="https://github.com/a37ai/cloud/issues">
+    <img src="https://img.shields.io/github/issues/a37ai/cloud.svg?style=for-the-badge" alt="Issues" />
   </a>
-  <a href="https://github.com/o37-autoforge/cloud/blob/master/LICENSE.txt">
-    <img src="https://img.shields.io/github/license/o37-autoforge/cloud.svg?style=for-the-badge" alt="MIT License" />
+  <a href="https://github.com/a37ai/cloud/blob/master/LICENSE.txt">
+    <img src="https://img.shields.io/github/license/a37ai/cloud.svg?style=for-the-badge" alt="MIT License" />
   </a>
   <a href="https://linkedin.com/company/o37">
     <img src="https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555" alt="LinkedIn" />
