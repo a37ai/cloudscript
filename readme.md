@@ -227,7 +227,7 @@ Distributed under the MIT License. See `LICENSE.txt` for more information.
 <!-- CONTACT -->
 # Contact
 
-[a37.ai](https://a37.ai) - [team@tryforge.ai](mailto:team@a37.ai)
+[a37.ai](https://a37.ai) - [team@a37.ai](mailto:team@a37.ai)
 
 Project Link: [https://github.com/a37ai/cloudscript/](https://github.com/a37ai/cloudscript/)
 
